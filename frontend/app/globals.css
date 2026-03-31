@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base layer: elegant defaults ── */
+@layer base {
+  ::selection {
+    background-color: rgba(99, 102, 241, 0.25);
+  }
+  * {
+    scrollbar-color: #4c5466 transparent;
+  }
+}
+
+/* Smooth scrollbar for the console output */
+.console-output::-webkit-scrollbar {
+  width: 6px;
+}
+.console-output::-webkit-scrollbar-track {
+  background: transparent;
+}
+.console-output::-webkit-scrollbar-thumb {
+  background: #4c5466;
+  border-radius: 3px;
+}
+.console-output::-webkit-scrollbar-thumb:hover {
+  background: #5c6578;
+}
+
+/* Sidebar scrollbar */
+nav::-webkit-scrollbar {
+  width: 4px;
+}
+nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+nav::-webkit-scrollbar-thumb {
+  background: #4c5466;
+  border-radius: 2px;
+}
+nav::-webkit-scrollbar-thumb:hover {
+  background: #5c6578;
+}
+
+/* React Flow mid-tone theme overrides */
+.workflow-canvas .react-flow__node {
+  font-family: inherit;
+}
+.workflow-canvas .react-flow__edge-path {
+  stroke-width: 2;
+}
+.workflow-canvas .react-flow__controls button {
+  background: #3e4656;
+  border-color: #4c5466;
+  color: #949cad;
+}
+.workflow-canvas .react-flow__controls button:hover {
+  background: #4c5466;
+}
+.workflow-canvas .react-flow__minimap {
+  background: #2b3140;
+}
+
+/* Dashboard animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 2000px; }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.4s ease-out;
+}
+.animate-slideDown {
+  animation: slideDown 0.3s ease-out;
+}
+
+/* Thin scrollbar for drill-down panels */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #4c5466;
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #5c6578;
+}
+
+/* Elegant card shadows for mid-tone surfaces */
+.card-elevated {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.card-elevated:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.1);
+}
