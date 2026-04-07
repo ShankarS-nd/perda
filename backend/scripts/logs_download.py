@@ -11,6 +11,10 @@ import sys
 import os
 from datetime import datetime
 
+# Ensure a full PATH so os.system() calls (7z, aws, find, sort, rm) work
+# even when launched from a systemd service with a stripped environment.
+os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:" + os.environ.get("PATH", "")
+
 
 def isInt(value):
     try:
