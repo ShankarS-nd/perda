@@ -1152,6 +1152,7 @@ async def tc_source(payload: TCSourceRequest):
 import re as _re
 import subprocess as _subprocess
 import shutil as _shutil
+import os as _os
 import sys as _sys
 
 # Directory where logs_download.py and other scripts live
@@ -1207,14 +1208,27 @@ async def device_log_download(payload: DeviceLogDownloadRequest):
 
     def stream():
         try:
-            # Guard: verify aws CLI and s3view profile are available
-            aws_bin = _shutil.which("aws")
+            # Guard: verify aws CLI and s3view profile are available.
+            # Extend PATH with common AWS CLI install locations so this works
+            # even when uvicorn is run as a systemd service with a minimal PATH.
+            extra_paths = [
+                "/usr/local/bin", "/usr/bin", "/bin",
+                "/usr/local/sbin", "/usr/sbin",
+                str(Path.home() / ".local" / "bin"),
+                "/snap/bin",
+            ]
+            env = _os.environ.copy()
+            current_paths = env.get("PATH", "").split(":")
+            env["PATH"] = ":".join(
+                p for p in (extra_paths + current_paths) if p and p not in current_paths[1:]
+            )
+            aws_bin = _shutil.which("aws", path=env["PATH"])
             if not aws_bin:
                 yield f"data: {json.dumps({'type': 'stdout', 'text': 'ERROR: aws CLI not found in PATH. Install awscli and try again.'})}\n\n"
                 yield f"data: {json.dumps({'type': 'exit', 'code': 1})}\n\n"
                 return
             try:
-                chk = _subprocess.run(["aws", "configure", "list-profiles"], capture_output=True, text=True, timeout=5)
+                chk = _subprocess.run([aws_bin, "configure", "list-profiles"], capture_output=True, text=True, timeout=5, env=env)
                 profiles = chk.stdout
             except Exception as profile_err:
                 profiles = ""
@@ -1229,6 +1243,7 @@ async def device_log_download(payload: DeviceLogDownloadRequest):
                 stderr=_subprocess.STDOUT,
                 text=True,
                 cwd=str(DEVICE_LOGS_BASE),
+                env=env,
             )
             for line in iter(proc.stdout.readline, ""):
                 yield f"data: {json.dumps({'type': 'stdout', 'text': line.rstrip()})}\n\n"
