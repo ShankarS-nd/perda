@@ -1218,6 +1218,13 @@ async def device_log_download(payload: DeviceLogDownloadRequest):
                 "/snap/bin",
             ]
             env = _os.environ.copy()
+            # Ensure HOME points to the actual user's home so aws finds ~/.aws/credentials
+            if not env.get("HOME") or env["HOME"] == "/root":
+                import pwd as _pwd
+                try:
+                    env["HOME"] = _pwd.getpwuid(_os.getuid()).pw_dir
+                except Exception:
+                    pass
             current_paths = env.get("PATH", "").split(":")
             env["PATH"] = ":".join(
                 p for p in (extra_paths + current_paths) if p and p not in current_paths[1:]
