@@ -55,7 +55,7 @@ type ConditionType = "success" | "failure" | "always";
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 const CONDITION_COLORS: Record<ConditionType, string> = {
   success: "#22c55e",
   failure: "#ef4444",
@@ -548,15 +548,15 @@ export default function WorkflowBuilder() {
   return (
     <div className="flex flex-col h-full gap-3">
       {/* Top bar */}
-      <div className="flex items-center gap-3 flex-wrap rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-3">
+      <div className="flex items-center gap-3 flex-wrap ds-card px-4 py-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="h-8 w-8 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0">
+          <div className="h-8 w-8 rounded-[10px] bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10 flex items-center justify-center shrink-0">
             <svg className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
             </svg>
           </div>
           <input
-            className="bg-transparent text-lg font-bold text-white focus:outline-none min-w-0 flex-1 border-b border-transparent focus:border-indigo-500/50 transition"
+            className="bg-transparent text-lg font-semibold text-white focus:outline-none min-w-0 flex-1 border-b border-transparent focus:border-indigo-500/40 transition-colors"
             value={workflowName}
             onChange={e => setWorkflowName(e.target.value)}
             placeholder="Workflow Name"
@@ -564,19 +564,19 @@ export default function WorkflowBuilder() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {statusMsg && (
-            <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+            <span className={`ds-badge ${
               statusMsg.includes("fail") || statusMsg.includes("Failed")
-                ? "bg-red-900/30 text-red-400"
+                ? "ds-badge-error"
                 : statusMsg.includes("success") || statusMsg === "Saved!"
-                ? "bg-green-900/30 text-green-400"
-                : "bg-indigo-900/30 text-indigo-400"
+                ? "ds-badge-success"
+                : "ds-badge-info"
             }`}>
               {statusMsg}
             </span>
           )}
           <button
             onClick={newWorkflow}
-            className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700 transition"
+            className="ds-btn-secondary text-xs py-1.5 px-3"
             title="New workflow"
           >
             + New
@@ -584,14 +584,14 @@ export default function WorkflowBuilder() {
           <button
             onClick={() => saveWorkflow()}
             disabled={saving}
-            className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 transition disabled:opacity-50"
+            className="ds-btn-primary text-xs py-1.5 px-4"
           >
             {saving ? "Saving…" : "Save"}
           </button>
           <button
             onClick={executeWorkflow}
             disabled={executing || nodes.length === 0}
-            className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 transition disabled:opacity-50 flex items-center gap-1.5"
+            className="inline-flex items-center gap-1.5 rounded-[10px] bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 transition-all disabled:opacity-50 shadow-lg shadow-emerald-600/15"
           >
             {executing ? (
               <><Spinner /> Running…</>
@@ -602,7 +602,7 @@ export default function WorkflowBuilder() {
           {workflowId && (
             <button
               onClick={deleteCurrentWorkflow}
-              className="rounded-lg border border-red-800 bg-red-950/50 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-900/50 transition"
+              className="ds-btn-danger text-xs py-1.5 px-3"
             >
               Delete
             </button>
@@ -615,9 +615,9 @@ export default function WorkflowBuilder() {
         {/* Left panel — scripts + saved workflows */}
         <div className="w-52 shrink-0 flex flex-col gap-3 overflow-y-auto">
           {/* Script palette */}
-          <div className="rounded-xl border border-gray-800 bg-gray-900/70 overflow-hidden">
-            <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/50">
-              <h4 className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+          <div className="ds-card overflow-hidden">
+            <div className="ds-card-header">
+              <h4 className="ds-section-title">
                 Scripts
               </h4>
             </div>
@@ -626,7 +626,7 @@ export default function WorkflowBuilder() {
                 <button
                   key={s.name}
                   onClick={() => addNode(s.name)}
-                  className="w-full text-left rounded-lg border border-gray-700/50 bg-gray-800/50 px-3 py-2 text-xs text-gray-300 hover:bg-indigo-600/10 hover:text-white hover:border-indigo-600/30 transition group"
+                  className="w-full text-left rounded-[10px] border border-white/[0.04] bg-white/[0.02] px-3 py-2 text-xs text-gray-300 hover:bg-indigo-500/[0.08] hover:text-white hover:border-indigo-500/20 transition-all duration-150 group"
                 >
                   <span className="flex items-center gap-2">
                     <span className="h-1.5 w-1.5 rounded-full bg-gray-600 group-hover:bg-indigo-400 transition shrink-0" />
@@ -644,9 +644,9 @@ export default function WorkflowBuilder() {
           </div>
 
           {/* Saved workflows */}
-          <div className="rounded-xl border border-gray-800 bg-gray-900/70 overflow-hidden">
-            <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/50">
-              <h4 className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+          <div className="ds-card overflow-hidden">
+            <div className="ds-card-header">
+              <h4 className="ds-section-title">
                 Saved Workflows
               </h4>
             </div>
@@ -655,10 +655,10 @@ export default function WorkflowBuilder() {
                 <button
                   key={wf.id}
                   onClick={() => loadWorkflow(wf)}
-                  className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition ${
+                  className={`w-full text-left rounded-[10px] border px-3 py-2 text-xs transition-all duration-150 ${
                     workflowId === wf.id
-                      ? "border-indigo-600/60 bg-indigo-600/10 text-indigo-300"
-                      : "border-gray-700/50 bg-gray-800/50 text-gray-300 hover:bg-gray-700/50"
+                      ? "border-indigo-500/30 bg-indigo-500/[0.08] text-indigo-300"
+                      : "border-white/[0.04] bg-white/[0.02] text-gray-300 hover:bg-white/[0.04]"
                   }`}
                 >
                   {wf.name}
@@ -675,7 +675,7 @@ export default function WorkflowBuilder() {
         <div className="flex-1 flex flex-col gap-3 min-h-0">
           {/* Canvas */}
           <div
-            className="flex-1 rounded-xl border border-gray-800 bg-gray-950 overflow-hidden min-h-[300px]"
+            className="flex-1 rounded-xl border border-white/[0.06] bg-[#0a0c12] overflow-hidden min-h-[300px]"
             onKeyDown={onKeyDown}
             tabIndex={0}
           >
@@ -700,25 +700,25 @@ export default function WorkflowBuilder() {
           >
             <Background color="#4c5466" gap={24} size={1} />
             <Controls
-              className="!bg-gray-800 !border-gray-700 !shadow-lg [&>button]:!bg-gray-800 [&>button]:!border-gray-700 [&>button]:!text-gray-400 [&>button:hover]:!bg-gray-700"
+              className="!bg-[#1a1d28] !border-white/[0.06] !shadow-lg !rounded-xl [&>button]:!bg-[#1a1d28] [&>button]:!border-white/[0.06] [&>button]:!text-gray-400 [&>button:hover]:!bg-[#22262f]"
             />
             <MiniMap
               nodeStrokeColor="#6366f1"
               nodeColor="#3730a3"
               maskColor="rgba(0,0,0,0.4)"
-              className="!bg-gray-900 !border-gray-800"
+              className="!bg-[#12141c] !border-white/[0.06] !rounded-xl"
             />
           </ReactFlow>
           </div>
 
           {/* Bottom panel — Live Console + Execution Results */}
           {(consoleOpen || Object.keys(executionLog).length > 0) && (
-            <div className="rounded-xl border border-gray-800 bg-gray-900/70 overflow-hidden shrink-0 flex flex-col" style={{ maxHeight: "280px" }}>
+            <div className="ds-card overflow-hidden shrink-0 flex flex-col" style={{ maxHeight: "280px" }}>
               {/* Tab bar */}
-              <div className="flex items-center border-b border-gray-800 bg-gray-900/50 px-2 shrink-0">
+              <div className="flex items-center border-b border-white/[0.04] bg-[#12141c] px-2 shrink-0">
                 <button
                   onClick={() => setConsoleOpen(true)}
-                  className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition border-b-2 -mb-px ${
+                  className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors border-b-2 -mb-px ${
                     consoleOpen
                       ? "text-indigo-400 border-indigo-500"
                       : "text-gray-500 border-transparent hover:text-gray-400"
@@ -729,7 +729,7 @@ export default function WorkflowBuilder() {
                 </button>
                 <button
                   onClick={() => setConsoleOpen(false)}
-                  className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition border-b-2 -mb-px ${
+                  className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors border-b-2 -mb-px ${
                     !consoleOpen
                       ? "text-indigo-400 border-indigo-500"
                       : "text-gray-500 border-transparent hover:text-gray-400"
@@ -752,7 +752,7 @@ export default function WorkflowBuilder() {
                   {consoleOpen && consoleLines.length > 0 && (
                     <button
                       onClick={() => setConsoleLines([])}
-                      className="text-[10px] text-gray-600 hover:text-gray-400 transition"
+                      className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
                     >
                       Clear
                     </button>
@@ -764,7 +764,7 @@ export default function WorkflowBuilder() {
               {consoleOpen ? (
                 <pre
                   ref={consoleRef}
-                  className="flex-1 overflow-y-auto bg-gray-950 p-3 font-mono text-xs leading-relaxed"
+                  className="flex-1 overflow-y-auto bg-[#0a0c12] p-3 font-mono text-xs leading-relaxed"
                 >
                   {consoleLines.length === 0 ? (
                     <span className="text-gray-600 italic">
@@ -804,10 +804,10 @@ export default function WorkflowBuilder() {
                           <button
                             key={n.id}
                             onClick={() => setShowStepDetail(n.id)}
-                            className={`text-left rounded-lg border p-2.5 transition hover:brightness-110 ${
-                              log.status === "success" ? "border-green-800/50 bg-green-950/20" :
-                              log.status === "failed"  ? "border-red-800/50 bg-red-950/20" :
-                              "border-gray-800 bg-gray-800/30"
+                            className={`text-left rounded-[10px] border p-2.5 transition-all duration-150 hover:brightness-110 ${
+                              log.status === "success" ? "border-green-500/15 bg-green-500/[0.04]" :
+                              log.status === "failed"  ? "border-red-500/15 bg-red-500/[0.04]" :
+                              "border-white/[0.06] bg-white/[0.02]"
                             }`}
                           >
                             <div className="flex items-center gap-2 mb-0.5">
@@ -890,12 +890,12 @@ export default function WorkflowBuilder() {
               <button
                 key={c}
                 onClick={() => setConfigCondition(c)}
-                className={`w-full text-left rounded-lg border px-4 py-3 text-sm font-medium transition ${
+                className={`w-full text-left rounded-[10px] border px-4 py-3 text-sm font-medium transition-all duration-150 ${
                   configCondition === c
-                    ? c === "success" ? "border-green-600 bg-green-950/40 text-green-300"
-                    : c === "failure" ? "border-red-600 bg-red-950/40 text-red-300"
-                    : "border-indigo-600 bg-indigo-950/40 text-indigo-300"
-                    : "border-gray-700 bg-gray-800 text-gray-400 hover:bg-gray-700"
+                    ? c === "success" ? "border-green-500/30 bg-green-500/[0.06] text-green-300"
+                    : c === "failure" ? "border-red-500/30 bg-red-500/[0.06] text-red-300"
+                    : "border-indigo-500/30 bg-indigo-500/[0.06] text-indigo-300"
+                    : "border-white/[0.06] bg-white/[0.02] text-gray-400 hover:bg-white/[0.04]"
                 }`}
               >
                 <span className="uppercase text-xs tracking-wider">{c}</span>
@@ -909,13 +909,13 @@ export default function WorkflowBuilder() {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setConfigEdge(null)}
-                className="rounded-lg bg-gray-800 px-4 py-2 text-xs text-gray-300 hover:bg-gray-700"
+                className="ds-btn-secondary text-xs"
               >
                 Cancel
               </button>
               <button
                 onClick={saveEdgeCondition}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+                className="ds-btn-primary text-xs"
               >
                 Apply
               </button>
@@ -953,10 +953,10 @@ function StepDetail({ log }: { log: any }) {
           <span className="text-xs font-mono text-gray-500">{log.execution_time.toFixed(3)}s</span>
         )}
         {output.status && (
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-            output.status === "pass" ? "bg-green-900/40 text-green-400" :
-            output.status === "partial_pass" ? "bg-amber-900/40 text-amber-400" :
-            "bg-red-900/40 text-red-400"
+          <span className={`ds-badge ${
+            output.status === "pass" ? "ds-badge-success" :
+            output.status === "partial_pass" ? "ds-badge-warning" :
+            "ds-badge-error"
           }`}>
             {output.status === "partial_pass" ? "Partial Pass" : output.status.toUpperCase()}
           </span>
@@ -968,14 +968,14 @@ function StepDetail({ log }: { log: any }) {
         <div className="space-y-2">
           {/* Found / Alive */}
           {(output.found || output.alive) && (output.found !== "" || output.alive !== "") && (
-            <div className="rounded-lg border border-green-800/40 bg-green-950/20 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-green-500 mb-1.5">
+            <div className="rounded-[10px] border border-green-500/15 bg-green-500/[0.04] p-3">
+              <p className="ds-label text-green-500 mb-1.5">
                 {output.found !== undefined ? "Broadcasting" : "Alive"}
                 {" "}({output.found_count ?? output.alive_count ?? 0})
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {(output.found || output.alive || "").split(",").filter(Boolean).map((d: string) => (
-                  <span key={d} className="inline-flex items-center gap-1 rounded-md bg-green-900/30 border border-green-800/40 px-2 py-0.5 text-xs text-green-300 font-mono">
+                  <span key={d} className="ds-badge ds-badge-success font-mono">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
                     {d}
                   </span>
@@ -986,14 +986,14 @@ function StepDetail({ log }: { log: any }) {
 
           {/* Missing / Not alive */}
           {(output.missing || output.not_alive) && (output.missing !== "" || output.not_alive !== "") && (
-            <div className="rounded-lg border border-red-800/40 bg-red-950/20 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-red-500 mb-1.5">
+            <div className="rounded-[10px] border border-red-500/15 bg-red-500/[0.04] p-3">
+              <p className="ds-label text-red-500 mb-1.5">
                 {output.missing !== undefined ? "NOT Broadcasting" : "Not Alive"}
                 {" "}({output.missing_count ?? output.not_alive_count ?? 0})
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {(output.missing || output.not_alive || "").split(",").filter(Boolean).map((d: string) => (
-                  <span key={d} className="inline-flex items-center gap-1 rounded-md bg-red-900/30 border border-red-800/40 px-2 py-0.5 text-xs text-red-300 font-mono">
+                  <span key={d} className="ds-badge ds-badge-error font-mono">
                     <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
                     {d}
                   </span>
@@ -1006,8 +1006,8 @@ function StepDetail({ log }: { log: any }) {
 
       {log.stdout && (
         <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-green-500">stdout</p>
-          <pre className="rounded-lg bg-gray-950 p-3 text-xs text-green-400 leading-relaxed overflow-x-auto max-h-48 overflow-y-auto font-mono">
+          <p className="mb-1 ds-label text-green-500">stdout</p>
+          <pre className="rounded-[10px] bg-[#0a0c12] p-3 text-xs text-green-400 leading-relaxed overflow-x-auto max-h-48 overflow-y-auto font-mono">
             {log.stdout}
           </pre>
         </div>
@@ -1015,8 +1015,8 @@ function StepDetail({ log }: { log: any }) {
 
       {log.stderr && (
         <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-red-500">stderr</p>
-          <pre className="rounded-lg bg-gray-950 p-3 text-xs text-red-400 leading-relaxed overflow-x-auto max-h-48 overflow-y-auto font-mono">
+          <p className="mb-1 ds-label text-red-500">stderr</p>
+          <pre className="rounded-[10px] bg-[#0a0c12] p-3 text-xs text-red-400 leading-relaxed overflow-x-auto max-h-48 overflow-y-auto font-mono">
             {log.stderr}
           </pre>
         </div>
@@ -1024,8 +1024,8 @@ function StepDetail({ log }: { log: any }) {
 
       {output && Object.keys(output).length > 0 && (
         <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-indigo-400">Output JSON</p>
-          <pre className="rounded-lg bg-gray-950 p-3 text-xs text-indigo-300 leading-relaxed overflow-x-auto font-mono">
+          <p className="mb-1 ds-label text-indigo-400">Output JSON</p>
+          <pre className="rounded-[10px] bg-[#0a0c12] p-3 text-xs text-indigo-300 leading-relaxed overflow-x-auto font-mono">
             {JSON.stringify(output, null, 2)}
           </pre>
         </div>
@@ -1110,11 +1110,11 @@ function NodeConfigModal({
       <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
         {/* Script selector */}
         <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1 block">
+          <label className="ds-label">
             Script
           </label>
           <select
-            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none"
+            className="ds-input w-full cursor-pointer appearance-none"
             value={configScript}
             onChange={e => onChangeScript(e.target.value)}
           >
@@ -1127,14 +1127,14 @@ function NodeConfigModal({
 
         {/* Retry */}
         <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1 block">
+          <label className="ds-label">
             Retry Count
           </label>
           <input
             type="number"
             min={0}
             max={10}
-            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none"
+            className="ds-input w-full"
             value={configRetry}
             onChange={e => onChangeRetry(parseInt(e.target.value) || 0)}
           />
@@ -1143,7 +1143,7 @@ function NodeConfigModal({
         {/* Arguments */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            <label className="ds-label mb-0">
               Arguments
             </label>
             {upstream.length > 0 && (
@@ -1175,10 +1175,10 @@ function NodeConfigModal({
                     </div>
                     <div className="flex items-center gap-1">
                       <input
-                        className={`flex-1 rounded-lg border px-3 py-1.5 text-xs focus:outline-none transition ${
+                        className={`flex-1 ds-input text-xs py-1.5 ${
                           isLinked
-                            ? "border-indigo-600/60 bg-indigo-950/30 text-indigo-300 font-mono"
-                            : "border-gray-700 bg-gray-800 text-gray-100 focus:border-indigo-500"
+                            ? "!border-indigo-500/30 !bg-indigo-500/[0.06] text-indigo-300 font-mono"
+                            : ""
                         }`}
                         value={val}
                         onChange={e => onChangeArgs((a: Record<string, string>) => ({ ...a, [key]: e.target.value }))}
@@ -1215,22 +1215,22 @@ function NodeConfigModal({
 
                 {/* Upstream reference picker dropdown */}
                 {showPicker && (
-                  <div className="absolute z-20 left-0 right-8 mt-1 rounded-lg border border-gray-700 bg-gray-850 bg-gray-900 shadow-xl max-h-40 overflow-y-auto">
-                    <div className="px-2 py-1.5 border-b border-gray-800">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  <div className="absolute z-20 left-0 right-8 mt-1 rounded-[10px] border border-white/[0.08] bg-[#1a1d28] shadow-xl max-h-40 overflow-y-auto">
+                    <div className="px-2 py-1.5 border-b border-white/[0.04]">
+                      <span className="ds-section-title">
                         Pick from upstream
                       </span>
                     </div>
                     {upstream.map(n => (
                       <div key={n.id}>
-                        <div className="px-2 py-1 bg-gray-800/50">
+                        <div className="px-2 py-1 bg-white/[0.02]">
                           <span className="text-[10px] font-semibold text-indigo-400">{n.data.script}</span>
                           <span className="text-[10px] text-gray-600 ml-1">({n.id})</span>
                         </div>
                         {upstreamRefs.filter(r => r.nodeId === n.id).map(ref => (
                           <button
                             key={`${ref.nodeId}-${ref.argName}`}
-                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-indigo-600/10 transition flex items-center gap-2"
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-indigo-500/[0.08] transition-colors flex items-center gap-2"
                             onMouseDown={(e) => {
                               e.preventDefault();
                               insertRef(key, `{{${ref.scriptName}.${ref.argName}}}`);
@@ -1267,13 +1267,13 @@ function NodeConfigModal({
 
         {/* Upstream summary hint */}
         {upstream.length > 0 && (
-          <div className="rounded-lg border border-gray-800 bg-gray-800/30 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+          <div className="rounded-[10px] border border-white/[0.06] bg-white/[0.02] p-3">
+            <p className="ds-label mb-1">
               Upstream nodes
             </p>
             <div className="flex flex-wrap gap-1.5">
               {upstream.map(n => (
-                <span key={n.id} className="inline-flex items-center gap-1 rounded-md border border-gray-700 bg-gray-800/60 px-2 py-0.5 text-[10px]">
+                <span key={n.id} className="ds-badge ds-badge-info font-mono">
                   <span className="text-indigo-400 font-mono">{n.data.script}</span>
                   <span className="text-gray-600">· {Object.keys(n.data.args || {}).length} args</span>
                 </span>
@@ -1289,13 +1289,13 @@ function NodeConfigModal({
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={onClose}
-            className="rounded-lg bg-gray-800 px-4 py-2 text-xs text-gray-300 hover:bg-gray-700"
+            className="ds-btn-secondary text-xs"
           >
             Cancel
           </button>
           <button
             onClick={onSave}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+            className="ds-btn-primary text-xs"
           >
             Apply
           </button>
@@ -1322,13 +1322,13 @@ function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="ds-modal-overlay"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-lg rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-800 px-6 py-4">
-          <h3 className="text-lg font-bold text-white">{title}</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
+      <div className="ds-modal max-w-lg">
+        <div className="ds-modal-header">
+          <h3 className="text-lg font-semibold text-white">{title}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors p-1 rounded-lg hover:bg-white/[0.06]">
             <CloseIcon />
           </button>
         </div>
@@ -1340,12 +1340,12 @@ function Modal({
 
 function StatusBadge({ status }: { status: string }) {
   const cls =
-    status === "success" ? "bg-green-900/50 text-green-400 border-green-800" :
-    status === "failed"  ? "bg-red-900/50 text-red-400 border-red-800"     :
-    status === "skipped" ? "bg-gray-800/50 text-gray-500 border-gray-700"  :
-    "bg-blue-900/50 text-blue-400 border-blue-800";
+    status === "success" ? "ds-badge-success" :
+    status === "failed"  ? "ds-badge-error"   :
+    status === "skipped" ? "ds-badge-neutral"  :
+    "ds-badge-info";
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+    <span className={`ds-badge ${cls}`}>
       {status}
     </span>
   );

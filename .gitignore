@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+*.egg-info/
+
+# Database
+backend/perda.db
+
+# Cache & generated output
+backend/cache/
+backend/device_logs_output/
+backend/output/
+
+# Next.js
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+
+# Env files (contain secrets)
+.env
+backend/.env
+frontend/.env.local
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store

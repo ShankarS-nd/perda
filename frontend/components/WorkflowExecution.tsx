@@ -36,7 +36,7 @@ interface RunDetail extends WorkflowRun {
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -87,14 +87,21 @@ export default function WorkflowExecution() {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white">Workflow Runs</h2>
-          <p className="mt-1 text-sm text-gray-400">Execution history for all workflows.</p>
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10">
+            <svg className="h-[18px] w-[18px] text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="ds-page-title">Workflow Runs</h2>
+            <p className="ds-page-subtitle">Execution history for all workflows</p>
+          </div>
         </div>
         <button
           onClick={fetchRuns}
           disabled={loading}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 transition disabled:opacity-50"
+          className="ds-btn-secondary"
         >
           <RefreshIcon spinning={loading} />
           Refresh
@@ -102,8 +109,8 @@ export default function WorkflowExecution() {
       </div>
 
       {/* Runs table */}
-      <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-900/70 shadow-sm">
-        <div className="border-b border-gray-800 bg-gray-900 px-5 py-3">
+      <div className="ds-card overflow-hidden">
+        <div className="ds-card-header">
           <h3 className="text-sm font-semibold text-gray-300">
             Recent Runs <span className="font-normal text-gray-500">· {runs.length}</span>
           </h3>
@@ -114,21 +121,31 @@ export default function WorkflowExecution() {
               <Spinner /> <span className="ml-3 text-sm text-gray-500">Loading…</span>
             </div>
           ) : runs.length === 0 ? (
-            <p className="py-12 text-center text-sm text-gray-600 italic">No workflow runs yet.</p>
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="relative mb-5">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 border border-indigo-500/10">
+                  <svg className="h-8 w-8 text-indigo-400/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
+                  </svg>
+                </div>
+              </div>
+              <p className="text-[15px] font-medium text-gray-400 mb-1">No workflow runs yet</p>
+              <p className="text-sm text-gray-600 max-w-xs">Execute a workflow and results will appear here</p>
+            </div>
           ) : (
-            <table className="w-full text-sm text-left">
-              <thead className="sticky top-0 bg-gray-900 border-b border-gray-800 z-10">
+            <table className="ds-table">
+              <thead className="sticky top-0 bg-[#12141c] border-b border-white/[0.06] z-10">
                 <tr>
-                  <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Workflow</th>
-                  <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</th>
-                  <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Duration</th>
-                  <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Started</th>
-                  <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-400 text-right">Details</th>
+                  <th className="px-5 py-3 ds-section-title">Workflow</th>
+                  <th className="px-5 py-3 ds-section-title">Status</th>
+                  <th className="px-5 py-3 ds-section-title">Duration</th>
+                  <th className="px-5 py-3 ds-section-title">Started</th>
+                  <th className="px-5 py-3 ds-section-title text-right">Details</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/60">
+              <tbody className="divide-y divide-white/[0.03]">
                 {runs.map(run => (
-                  <tr key={run.id} className="hover:bg-gray-800/40 transition">
+                  <tr key={run.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-5 py-3.5 font-medium text-gray-200">{run.workflow_name}</td>
                     <td className="px-5 py-3.5"><StatusBadge status={run.status} /></td>
                     <td className="px-5 py-3.5 text-xs font-mono text-gray-400">{duration(run)}</td>
@@ -136,7 +153,7 @@ export default function WorkflowExecution() {
                     <td className="px-5 py-3.5 text-right">
                       <button
                         onClick={() => openRun(run.id)}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600/20 px-3 py-1.5 text-xs font-medium text-indigo-400 hover:bg-indigo-600/30 transition"
+                        className="ds-badge ds-badge-info cursor-pointer hover:opacity-80 transition-opacity"
                       >
                         View
                       </button>
@@ -188,20 +205,20 @@ function RunDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="ds-modal-overlay"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
+      <div className="ds-modal max-w-4xl max-h-[85vh]">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-800 px-6 py-4 shrink-0">
+        <div className="ds-modal-header shrink-0">
           <div>
-            <h3 className="text-lg font-bold text-white">{run.workflow_name}</h3>
+            <h3 className="text-lg font-semibold text-white">{run.workflow_name}</h3>
             <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
               <StatusBadge status={run.status} />
               <span>Run #{run.id}</span>
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors p-1 rounded-lg hover:bg-white/[0.06]">
             <CloseIcon />
           </button>
         </div>
@@ -213,19 +230,19 @@ function RunDetailModal({
         ) : (
           <div className="flex flex-1 min-h-0">
             {/* Steps list */}
-            <div className="w-64 shrink-0 border-r border-gray-800 overflow-y-auto">
-              <div className="px-4 py-3 border-b border-gray-800">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            <div className="w-64 shrink-0 border-r border-white/[0.06] overflow-y-auto">
+              <div className="px-4 py-3 border-b border-white/[0.04]">
+                <h4 className="ds-section-title">
                   Steps ({run.steps?.length ?? 0})
                 </h4>
               </div>
-              <div className="divide-y divide-gray-800/60">
+              <div className="divide-y divide-white/[0.03]">
                 {(run.steps ?? []).map(step => (
                   <button
                     key={step.id}
                     onClick={() => onSelectStep(step)}
-                    className={`w-full text-left px-4 py-3 flex items-center gap-2 transition ${
-                      selectedStep?.id === step.id ? "bg-indigo-600/10" : "hover:bg-gray-800/50"
+                    className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-colors ${
+                      selectedStep?.id === step.id ? "bg-indigo-500/[0.08]" : "hover:bg-white/[0.03]"
                     }`}
                   >
                     <span className={`h-2 w-2 rounded-full shrink-0 ${
@@ -262,8 +279,8 @@ function RunDetailModal({
 
                   {selectedStep.stdout && (
                     <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-green-500">stdout</p>
-                      <pre className="rounded-lg bg-gray-950 p-3 text-xs text-green-400 leading-relaxed overflow-auto max-h-48 font-mono">
+                      <p className="mb-1 ds-label text-green-500">stdout</p>
+                      <pre className="rounded-[10px] bg-[#0a0c12] p-3 text-xs text-green-400 leading-relaxed overflow-auto max-h-48 font-mono">
                         {selectedStep.stdout}
                       </pre>
                     </div>
@@ -271,8 +288,8 @@ function RunDetailModal({
 
                   {selectedStep.stderr && (
                     <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-red-500">stderr</p>
-                      <pre className="rounded-lg bg-gray-950 p-3 text-xs text-red-400 leading-relaxed overflow-auto max-h-48 font-mono">
+                      <p className="mb-1 ds-label text-red-500">stderr</p>
+                      <pre className="rounded-[10px] bg-[#0a0c12] p-3 text-xs text-red-400 leading-relaxed overflow-auto max-h-48 font-mono">
                         {selectedStep.stderr}
                       </pre>
                     </div>
@@ -280,8 +297,8 @@ function RunDetailModal({
 
                   {selectedStep.output_json && selectedStep.output_json !== "{}" && (
                     <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-indigo-400">Output</p>
-                      <pre className="rounded-lg bg-gray-950 p-3 text-xs text-indigo-300 leading-relaxed overflow-auto font-mono">
+                      <p className="mb-1 ds-label text-indigo-400">Output</p>
+                      <pre className="rounded-[10px] bg-[#0a0c12] p-3 text-xs text-indigo-300 leading-relaxed overflow-auto font-mono">
                         {typeof selectedStep.output_json === "string"
                           ? JSON.stringify(JSON.parse(selectedStep.output_json), null, 2)
                           : JSON.stringify(selectedStep.output_json, null, 2)}
@@ -298,10 +315,10 @@ function RunDetailModal({
           </div>
         )}
 
-        <div className="border-t border-gray-800 px-6 py-3 shrink-0 flex justify-end">
+        <div className="border-t border-white/[0.06] px-6 py-3 shrink-0 flex justify-end">
           <button
             onClick={onClose}
-            className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700"
+            className="ds-btn-secondary"
           >
             Close
           </button>
@@ -317,12 +334,12 @@ function RunDetailModal({
 
 function StatusBadge({ status }: { status: string }) {
   const cls =
-    status === "success" ? "bg-green-900/50 text-green-400 border-green-800" :
-    status === "failed"  ? "bg-red-900/50 text-red-400 border-red-800"     :
-    status === "running" ? "bg-blue-900/50 text-blue-400 border-blue-800"  :
-    "bg-gray-800/50 text-gray-500 border-gray-700";
+    status === "success" ? "ds-badge-success" :
+    status === "failed"  ? "ds-badge-error"   :
+    status === "running" ? "ds-badge-info"     :
+    "ds-badge-neutral";
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+    <span className={`ds-badge ${cls}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${
         status === "success" ? "bg-green-400" :
         status === "failed"  ? "bg-red-400"   :

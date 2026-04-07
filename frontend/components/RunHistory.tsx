@@ -21,7 +21,7 @@ interface ScriptRun {
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -79,18 +79,25 @@ export default function RunHistory() {
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Heading */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white">
-            Run History
-          </h2>
-          <p className="mt-1 text-sm text-gray-400">
-            View past script executions and their logs.
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10">
+            <svg className="h-[18px] w-[18px] text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="ds-page-title">
+              Run History
+            </h2>
+            <p className="ds-page-subtitle">
+              View past script executions and their logs
+            </p>
+          </div>
         </div>
         <button
           onClick={fetchRuns}
           disabled={loading}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700 hover:text-white disabled:opacity-50"
+          className="ds-btn-secondary"
         >
           <RefreshIcon spinning={loading} />
           Refresh
@@ -99,14 +106,17 @@ export default function RunHistory() {
 
       {/* Error banner */}
       {error && (
-        <div className="rounded-lg border border-red-800 bg-red-950/60 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-xl border border-red-500/15 bg-red-500/[0.06] px-4 py-3 text-sm text-red-300 flex items-center gap-3">
+          <svg className="h-4 w-4 shrink-0 text-red-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
           {error}
         </div>
       )}
 
       {/* Table card */}
-      <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-900/70 shadow-sm">
-        <div className="border-b border-gray-800 bg-gray-900 px-5 py-3 flex items-center justify-between">
+      <div className="ds-card overflow-hidden">
+        <div className="ds-card-header flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-300">
             Executions{" "}
             {!loading && (
@@ -122,37 +132,41 @@ export default function RunHistory() {
               <span className="ml-3 text-sm text-gray-500">Loading history…</span>
             </div>
           ) : runs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-              <EmptyIcon />
-              <p className="mt-3 text-sm">No executions recorded yet.</p>
-              <p className="text-xs text-gray-600">Run a script and it will appear here.</p>
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="relative mb-5">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 border border-indigo-500/10">
+                  <EmptyIcon />
+                </div>
+              </div>
+              <p className="text-[15px] font-medium text-gray-400 mb-1">No executions recorded yet</p>
+              <p className="text-sm text-gray-600 max-w-xs">Run a script and it will appear here</p>
             </div>
           ) : (
-            <table className="w-full text-sm text-left">
-              <thead className="sticky top-0 bg-gray-900 border-b border-gray-800 z-10">
+            <table className="ds-table">
+              <thead className="sticky top-0 bg-[#12141c] border-b border-white/[0.06] z-10">
                 <tr>
-                  <th className="px-5 py-3 font-semibold text-gray-400 text-xs uppercase tracking-wider">
+                  <th className="px-5 py-3 ds-section-title">
                     Script
                   </th>
-                  <th className="px-5 py-3 font-semibold text-gray-400 text-xs uppercase tracking-wider">
+                  <th className="px-5 py-3 ds-section-title">
                     Status
                   </th>
-                  <th className="px-5 py-3 font-semibold text-gray-400 text-xs uppercase tracking-wider">
+                  <th className="px-5 py-3 ds-section-title">
                     Execution Time
                   </th>
-                  <th className="px-5 py-3 font-semibold text-gray-400 text-xs uppercase tracking-wider">
+                  <th className="px-5 py-3 ds-section-title">
                     Timestamp
                   </th>
-                  <th className="px-5 py-3 font-semibold text-gray-400 text-xs uppercase tracking-wider text-right">
+                  <th className="px-5 py-3 ds-section-title text-right">
                     Logs
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/60">
+              <tbody className="divide-y divide-white/[0.03]">
                 {runs.map((run) => (
                   <tr
                     key={run.id}
-                    className="transition hover:bg-gray-800/40"
+                    className="transition-colors hover:bg-white/[0.02]"
                   >
                     <td className="px-5 py-3.5">
                       <span className="font-medium text-gray-200">
@@ -171,7 +185,7 @@ export default function RunHistory() {
                     <td className="px-5 py-3.5 text-right">
                       <button
                         onClick={() => setSelectedRun(run)}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600/20 px-3 py-1.5 text-xs font-medium text-indigo-400 hover:bg-indigo-600/30 transition"
+                        className="ds-badge ds-badge-info cursor-pointer hover:opacity-80 transition-opacity"
                       >
                         <LogsIcon />
                         View Logs
@@ -212,14 +226,14 @@ function LogModal({ run, onClose }: { run: ScriptRun; onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="ds-modal-overlay"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
+      <div className="ds-modal max-w-3xl max-h-[85vh]">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-800 px-6 py-4 shrink-0">
+        <div className="ds-modal-header shrink-0">
           <div>
-            <h3 className="text-lg font-bold text-white">{run.script_name}</h3>
+            <h3 className="text-lg font-semibold text-white">{run.script_name}</h3>
             <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
               <StatusBadge status={run.status} />
               <span className="font-mono">{run.execution_time.toFixed(3)}s</span>
@@ -228,7 +242,7 @@ function LogModal({ run, onClose }: { run: ScriptRun; onClose: () => void }) {
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-gray-500 transition hover:bg-gray-800 hover:text-gray-300"
+            className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-gray-300"
           >
             <CloseIcon />
           </button>
@@ -236,11 +250,9 @@ function LogModal({ run, onClose }: { run: ScriptRun; onClose: () => void }) {
 
         {/* Arguments */}
         {run.arguments && run.arguments !== "{}" && (
-          <div className="border-b border-gray-800 px-6 py-3 shrink-0">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
-              Arguments
-            </p>
-            <pre className="text-xs text-gray-400 font-mono bg-gray-800/50 rounded-lg px-3 py-2 overflow-x-auto">
+          <div className="border-b border-white/[0.06] px-6 py-3 shrink-0">
+            <p className="ds-label mb-1">Arguments</p>
+            <pre className="text-xs text-gray-400 font-mono bg-[#0a0c12] rounded-[10px] px-3 py-2 overflow-x-auto">
               {JSON.stringify(JSON.parse(run.arguments), null, 2)}
             </pre>
           </div>
@@ -250,10 +262,10 @@ function LogModal({ run, onClose }: { run: ScriptRun; onClose: () => void }) {
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {hasStdout && (
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-green-500">
+              <p className="mb-2 ds-label text-green-500">
                 stdout
               </p>
-              <pre className="rounded-lg bg-gray-950 p-4 text-sm text-green-400 leading-relaxed overflow-x-auto max-h-64 overflow-y-auto font-mono">
+              <pre className="rounded-[10px] bg-[#0a0c12] p-4 text-sm text-green-400 leading-relaxed overflow-x-auto max-h-64 overflow-y-auto font-mono">
                 {run.stdout}
               </pre>
             </div>
@@ -261,10 +273,10 @@ function LogModal({ run, onClose }: { run: ScriptRun; onClose: () => void }) {
 
           {hasStderr && (
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-red-500">
+              <p className="mb-2 ds-label text-red-500">
                 stderr
               </p>
-              <pre className="rounded-lg bg-gray-950 p-4 text-sm text-red-400 leading-relaxed overflow-x-auto max-h-64 overflow-y-auto font-mono">
+              <pre className="rounded-[10px] bg-[#0a0c12] p-4 text-sm text-red-400 leading-relaxed overflow-x-auto max-h-64 overflow-y-auto font-mono">
                 {run.stderr}
               </pre>
             </div>
@@ -278,10 +290,10 @@ function LogModal({ run, onClose }: { run: ScriptRun; onClose: () => void }) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-gray-800 px-6 py-3 shrink-0 flex justify-end">
+        <div className="border-t border-white/[0.06] px-6 py-3 shrink-0 flex justify-end">
           <button
             onClick={onClose}
-            className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-gray-700"
+            className="ds-btn-secondary"
           >
             Close
           </button>
@@ -298,13 +310,7 @@ function LogModal({ run, onClose }: { run: ScriptRun; onClose: () => void }) {
 function StatusBadge({ status }: { status: string }) {
   const isSuccess = status === "success";
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-        isSuccess
-          ? "bg-green-900/50 text-green-400 border border-green-800"
-          : "bg-red-900/50 text-red-400 border border-red-800"
-      }`}
-    >
+    <span className={`ds-badge ${isSuccess ? "ds-badge-success" : "ds-badge-error"}`}>
       <span
         className={`h-1.5 w-1.5 rounded-full ${
           isSuccess ? "bg-green-400" : "bg-red-400"
@@ -343,7 +349,7 @@ function LogsIcon() {
 
 function EmptyIcon() {
   return (
-    <svg className="h-12 w-12 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+    <svg className="h-8 w-8 text-indigo-400/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
     </svg>
   );

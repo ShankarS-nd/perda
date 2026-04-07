@@ -6,6 +6,8 @@ import RunHistory from "@/components/RunHistory";
 import WorkflowBuilder from "@/components/WorkflowBuilder";
 import WorkflowExecution from "@/components/WorkflowExecution";
 import TestReportDashboard from "@/components/TestReportDashboard";
+import ConfidenceDashboard from "@/components/ConfidenceDashboard";
+import TCAnalysis from "@/components/TCAnalysis";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,9 +30,9 @@ interface ScriptInfo {
   outputs_dir: string;
 }
 
-type Page = "scripts" | "test-report" | "history" | "workflows" | "workflow-runs";
+type Page = "scripts" | "test-report" | "confidence" | "tc-analysis" | "history" | "workflows" | "workflow-runs";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 
 // ---------------------------------------------------------------------------
 // Root page
@@ -79,17 +81,17 @@ export default function Home() {
       {/* ---------------------------------------------------------------- */}
       {/* Sidebar                                                          */}
       {/* ---------------------------------------------------------------- */}
-      <aside className="w-72 shrink-0 border-r border-gray-800/60 bg-gray-950 flex flex-col">
+      <aside className="w-[268px] shrink-0 border-r border-white/[0.06] bg-[#0c0e14] flex flex-col">
         {/* Brand */}
-        <div className="px-5 py-5 border-b border-gray-800/60">
+        <div className="px-5 py-5 border-b border-white/[0.06]">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/20">
+            <div className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10">
               <svg className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
               </svg>
             </div>
             <div>
-              <h1 className="text-sm font-bold tracking-tight text-white">
+              <h1 className="text-sm font-semibold tracking-tight text-white">
                 Developer Toolkit
               </h1>
               <p className="text-[10px] text-gray-500">Perda Automation Platform</p>
@@ -98,7 +100,7 @@ export default function Home() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
           {/* Scripts Section */}
           <SidebarItem
             label="Scripts"
@@ -117,7 +119,7 @@ export default function Home() {
                 : "max-h-0 opacity-0"
             }`}
           >
-            <div className="ml-2 pl-3 border-l border-gray-800/60 py-1 space-y-0.5">
+            <div className="ml-2 pl-3 border-l border-white/[0.06] py-1 space-y-0.5">
               {fetchingScripts ? (
                 <div className="flex items-center gap-2 px-3 py-2">
                   <SmallSpinner />
@@ -130,17 +132,17 @@ export default function Home() {
                   <button
                     key={s.name}
                     onClick={() => handleScriptClick(s)}
-                    className={`group flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 ${
+                    className={`group flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-[10px] text-xs font-medium transition-all duration-150 ${
                       selectedScript?.name === s.name
-                        ? "bg-indigo-600/15 text-indigo-300 shadow-sm shadow-indigo-500/5"
-                        : "text-gray-400 hover:bg-gray-800/60 hover:text-gray-200"
+                        ? "bg-indigo-500/10 text-indigo-300 border border-indigo-500/10"
+                        : "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200 border border-transparent"
                     }`}
                   >
                     <span
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold uppercase transition-colors ${
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold uppercase transition-colors ${
                         selectedScript?.name === s.name
-                          ? "bg-indigo-600/25 text-indigo-400"
-                          : "bg-gray-800/80 text-gray-500 group-hover:bg-gray-700 group-hover:text-gray-400"
+                          ? "bg-indigo-500/20 text-indigo-400"
+                          : "bg-white/[0.06] text-gray-500 group-hover:bg-white/[0.08] group-hover:text-gray-400"
                       }`}
                     >
                       {s.name.replace(".py", "").charAt(0)}
@@ -170,6 +172,22 @@ export default function Home() {
             onClick={() => setActivePage("test-report")}
           />
 
+          {/* Test Case Confidence */}
+          <SidebarItem
+            label="TC Confidence"
+            icon={<ConfidenceIcon />}
+            active={activePage === "confidence"}
+            onClick={() => setActivePage("confidence")}
+          />
+
+          {/* TC Analysis */}
+          <SidebarItem
+            label="TC Analysis"
+            icon={<TCAnalysisIcon />}
+            active={activePage === "tc-analysis"}
+            onClick={() => setActivePage("tc-analysis")}
+          />
+
           {/* History */}
           <SidebarItem
             label="History"
@@ -179,7 +197,7 @@ export default function Home() {
           />
 
           {/* Workflows section */}
-          <div className="pt-4 mt-3 border-t border-gray-800/40">
+          <div className="pt-4 mt-3 border-t border-white/[0.04]">
             <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-widest text-gray-600">
               Workflows
             </p>
@@ -204,7 +222,7 @@ export default function Home() {
         </nav>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-gray-800/40 flex items-center justify-between">
+        <div className="px-5 py-3 border-t border-white/[0.04] flex items-center justify-between">
           <span className="text-[10px] text-gray-600">v0.1.0</span>
           <span className="flex h-2 w-2 rounded-full bg-green-500/80" title="Backend connected" />
         </div>
@@ -213,7 +231,7 @@ export default function Home() {
       {/* ---------------------------------------------------------------- */}
       {/* Main Panel                                                       */}
       {/* ---------------------------------------------------------------- */}
-      <main className="flex-1 overflow-y-auto bg-gray-900">
+      <main className="flex-1 overflow-y-auto bg-[#0f1117]">
         <div
           className={`${
             activePage === "workflows"
@@ -221,17 +239,31 @@ export default function Home() {
               : "p-6 lg:p-8 xl:p-10"
           }`}
         >
-          {activePage === "scripts" && (
+          <div className={activePage === "scripts" ? "" : "hidden"}>
             <ScriptRunner
               scripts={scripts}
               selectedScript={selectedScript}
               onSelectScript={setSelectedScript}
             />
-          )}
-          {activePage === "test-report" && <TestReportDashboard />}
-          {activePage === "history" && <RunHistory />}
-          {activePage === "workflows" && <WorkflowBuilder />}
-          {activePage === "workflow-runs" && <WorkflowExecution />}
+          </div>
+          <div className={activePage === "test-report" ? "" : "hidden"}>
+            <TestReportDashboard />
+          </div>
+          <div className={activePage === "confidence" ? "" : "hidden"}>
+            <ConfidenceDashboard />
+          </div>
+          <div className={activePage === "tc-analysis" ? "" : "hidden"}>
+            <TCAnalysis />
+          </div>
+          <div className={activePage === "history" ? "" : "hidden"}>
+            <RunHistory />
+          </div>
+          <div className={activePage === "workflows" ? "" : "hidden"}>
+            <WorkflowBuilder />
+          </div>
+          <div className={activePage === "workflow-runs" ? "" : "hidden"}>
+            <WorkflowExecution />
+          </div>
         </div>
       </main>
     </div>
@@ -262,12 +294,12 @@ function SidebarItem({
   onClick,
 }: SidebarItemProps) {
   const base =
-    "flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150";
+    "flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all duration-150";
   const activeClass =
-    "bg-indigo-600/15 text-indigo-300 shadow-sm shadow-indigo-500/5";
+    "bg-indigo-500/10 text-indigo-300 border border-indigo-500/10";
   const defaultClass =
-    "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200";
-  const disabledClass = "text-gray-600 cursor-not-allowed";
+    "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200 border border-transparent";
+  const disabledClass = "text-gray-600 cursor-not-allowed border border-transparent";
 
   return (
     <button
@@ -280,7 +312,7 @@ function SidebarItem({
       </span>
       <span className="flex-1">{label}</span>
       {disabled && (
-        <span className="text-[9px] uppercase tracking-wider text-gray-700 bg-gray-800/60 px-1.5 py-0.5 rounded">
+        <span className="text-[9px] uppercase tracking-wider text-gray-700 bg-white/[0.04] px-1.5 py-0.5 rounded">
           soon
         </span>
       )}
@@ -354,6 +386,22 @@ function TestReportIcon() {
   return (
     <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+}
+
+function ConfidenceIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+    </svg>
+  );
+}
+
+function TCAnalysisIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
     </svg>
   );
 }

@@ -1,0 +1,23 @@
+[Unit]
+Description=Perda Frontend (Next.js)
+After=network.target perda-backend.service
+Wants=perda-backend.service
+
+[Service]
+Type=simple
+User=__SERVER_USER__
+WorkingDirectory=__PERDA_DIR__/frontend
+
+# npm start runs "next start -H 0.0.0.0" (see package.json)
+ExecStart=/usr/bin/npm run start
+
+# Restart automatically on crash; wait 5 s before each retry
+Restart=on-failure
+RestartSec=5
+
+# Log to journald (view with: journalctl -u perda-frontend -f)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

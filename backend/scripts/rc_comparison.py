@@ -32,6 +32,7 @@ import re
 import sys
 import tarfile
 import tempfile
+from pathlib import Path
 
 import requests
 import pandas as pd
@@ -47,6 +48,10 @@ load_dotenv()
 
 SCRIPT_CWD = "."
 SCRIPT_OUTPUTS = "./output/rc_comparison"
+
+# Local cache directory for pre-downloaded scr.js files
+# Stored at  backend/cache/scrjs/<build_number>.js
+SCRJS_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "scrjs"
 
 # ── Device serial-number registries per platform ────────────────────
 # Each key is a platform label; value is a list of serial numbers.
@@ -157,19 +162,41 @@ def _check_auth(resp: requests.Response) -> None:
         )
 
 
+def _is_auth_redirect(resp: requests.Response) -> bool:
+    """Check if a response is a Jenkins auth redirect (expired token)."""
+    if resp.status_code in (301, 302, 303, 307, 308):
+        location = resp.headers.get("Location", "")
+        if "commenceLogin" in location or "securityRealm" in location:
+            return True
+    return False
+
+
 def _fetch_published_scrjs(build_number: str, session: requests.Session) -> str | None:
     """Try to get static/scr.js from the published HTML report."""
     url = f"{JENKINS_BASE_URL}/{build_number}/Test_5freport/static/scr.js"
     print(f"  ↓ Trying published report data: {url}")
     try:
-        resp = session.get(url, timeout=180)
+        resp = session.get(url, timeout=180, allow_redirects=False)
     except requests.exceptions.TooManyRedirects:
         print(f"    ⚠ Redirect loop for build {build_number} (report likely doesn't exist), will try artifact…")
         return None
+    if _is_auth_redirect(resp):
+        sys.exit(
+            "❌ Jenkins authentication failed (redirect to login). "
+            "Your JENKINS_TOKEN has likely expired. "
+            "Please generate a new API token at Jenkins → User → Configure → API Token and update .env."
+        )
     _check_auth(resp)
     if resp.status_code == 404:
         print("    ⚠ Published scr.js not found (404), will try artifact…")
         return None
+    if resp.status_code in (301, 302, 303, 307, 308):
+        # Non-auth redirect — follow it manually once
+        resp = session.get(resp.headers.get("Location", url), timeout=180)
+        _check_auth(resp)
+        if resp.status_code == 404:
+            print("    ⚠ Published scr.js not found (404 after redirect), will try artifact…")
+            return None
     resp.raise_for_status()
     print(f"    ✓ Downloaded ({len(resp.content):,} bytes)")
     return resp.text
@@ -180,13 +207,23 @@ def _fetch_artifact_scrjs(build_number: str, session: requests.Session) -> str:
     url = f"{JENKINS_BASE_URL}/{build_number}/artifact/report/report.tar.gz"
     print(f"  ↓ Downloading artifact: {url}")
     try:
-        resp = session.get(url, timeout=300, stream=True)
+        resp = session.get(url, timeout=300, stream=True, allow_redirects=False)
     except requests.exceptions.TooManyRedirects:
         sys.exit(
             f"❌ Build {build_number}: Report not available (Jenkins redirect loop). "
             f"The build may not exist or the test report was never generated."
         )
+    if _is_auth_redirect(resp):
+        sys.exit(
+            "❌ Jenkins authentication failed (redirect to login). "
+            "Your JENKINS_TOKEN has likely expired. "
+            "Please generate a new API token at Jenkins → User → Configure → API Token and update .env."
+        )
     _check_auth(resp)
+    if resp.status_code in (301, 302, 303, 307, 308):
+        # Follow non-auth redirects
+        resp = session.get(resp.headers.get("Location", url), timeout=300, stream=True)
+        _check_auth(resp)
     if resp.status_code == 404:
         sys.exit(
             f"❌ Build {build_number}: Neither published report nor "
@@ -227,17 +264,82 @@ def _fetch_artifact_scrjs(build_number: str, session: requests.Session) -> str:
         return js_content
 
 
-def fetch_report_js(build_number: str, session: requests.Session) -> str:
+def fetch_report_js(
+    build_number: str,
+    session: requests.Session,
+    use_cache: bool = True,
+) -> str:
     """Fetch DAST report scr.js for a build.
 
     Strategy:
+      0. Return from local disk cache if available and use_cache=True.
       1. Try published scr.js at Test_5freport/static/scr.js
-      2. Fall back to downloading artifact/report/report.tar.gz and extracting
+      2. Fall back to downloading artifact/report/report.tar.gz and extracting.
+      3. Always persist the fetched content to disk cache for future calls.
     """
+    cache_file = SCRJS_CACHE_DIR / f"{build_number}.js"
+    if use_cache and cache_file.is_file():
+        print(f"  ✓ Using cached scr.js for build {build_number} ({cache_file.stat().st_size:,} bytes)")
+        return cache_file.read_text(encoding="utf-8")
+
     js = _fetch_published_scrjs(build_number, session)
-    if js is not None:
-        return js
-    return _fetch_artifact_scrjs(build_number, session)
+    if js is None:
+        js = _fetch_artifact_scrjs(build_number, session)
+
+    # Always persist to cache so future calls skip Jenkins entirely
+    SCRJS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(js, encoding="utf-8")
+    print(f"  💾 Saved scr.js to cache: {cache_file}")
+
+    return js
+
+
+def fetch_dast_known_unknown_counts(
+    build_number: str,
+    session: requests.Session,
+) -> tuple[int | None, int | None]:
+    """Fetch authoritative known/unknown failure counts from the DAST HTML pages.
+
+    Tries to download ``linked_issues.html`` and ``unknown_issue.html`` from the
+    published Jenkins report and parse the count shown in each page's header.
+
+    Returns (known_count, unknown_count).  Either value may be ``None`` if the
+    page is not accessible.
+    """
+    known: int | None = None
+    unknown: int | None = None
+
+    for page, label in [("linked_issues.html", "known"), ("unknown_issue.html", "unknown")]:
+        url = f"{JENKINS_BASE_URL}/{build_number}/Test_5freport/{page}"
+        try:
+            resp = session.get(url, timeout=30, allow_redirects=False)
+            if _is_auth_redirect(resp):
+                continue  # skip on auth failure
+            if resp.status_code != 200 or len(resp.content) < 100:
+                continue
+            text = resp.text[:5000]
+            if label == "known":
+                # Pattern in linked_issues.html header table (DOTALL needed for newlines)
+                m = re.search(r"Total Failed Test Cases with Linked Issues.*?(\d+)", text, re.DOTALL)
+                if not m:
+                    # Fallback: count from index.html-style template
+                    m = re.search(r"Known Issues Count:\s*(\d+)", text)
+                if m:
+                    known = int(m.group(1))
+            else:
+                # unknown_issue.html header: "Total Failed Test Cases" followed by count
+                m = re.search(r"Total Failed Test Cases(?!.*Linked).*?(\d+)", text, re.DOTALL)
+                if m:
+                    unknown = int(m.group(1))
+                else:
+                    # First number in the header area is usually the count
+                    nums = re.findall(r">(\d+)<", text[:2000])
+                    if nums:
+                        unknown = int(nums[0])
+        except Exception:
+            pass
+
+    return known, unknown
 
 
 # =====================================================================
@@ -277,13 +379,34 @@ def extract_tc_id(testcase_name: str) -> str:
     return f"TC-{m.group(1)}" if m else "UNKNOWN"
 
 
-def _format_linked_issues(linked: list) -> str:
+# Jira statuses that indicate the issue is resolved / no longer active.
+# Test cases whose linked issues are ALL in these statuses are treated as
+# "unknown failures" (the existing fix should have addressed the issue).
+_RESOLVED_STATUSES = frozenset({
+    "CLOSED", "DONE", "RESOLVED",
+})
+
+# Jira project prefixes that represent test cases, NOT defect/bug tickets.
+# The DAST report only counts actual defect tickets (DT-*, DTA-*, ITN-*,
+# OCTO-*, IDMS-*, etc.) as "linked issues" for known-failure classification.
+# TC-* entries are self-references to the test case Jira item and are ignored.
+_TESTCASE_PREFIXES = ("TC-",)
+
+
+def _format_linked_issues(linked: list, *, active_only: bool = True) -> str:
     """Format linked_issues_status array into a display string.
 
     Input : [['TC-183', 'In Progress', 'https://…'], ['DT-1080', 'Open', …]]
-    Output: 'TC-183 (In Progress), DT-1080 (Open)'
+    Output: 'DT-1080 (Open)'
 
-    Entries like ['NA', 'NA', 'NA'] are skipped (no real Jira link).
+    Filtering rules (when *active_only* is True, the default):
+      1. Entries like ['NA', 'NA', 'NA'] are skipped (no real Jira link).
+      2. TC-* prefixed tickets are skipped (test-case self-references, not
+         defect tickets).
+      3. Entries whose status is Closed / Done / Resolved are skipped.
+
+    This matches the Jenkins DAST report behaviour where a test case is only a
+    "known failure" if it has at least one active defect ticket linked.
     """
     if not linked or not isinstance(linked, list):
         return ""
@@ -294,6 +417,14 @@ def _format_linked_issues(linked: list) -> str:
             # Skip placeholder entries that indicate no real linked issue
             if ticket_id in ("NA", "NONE", "", "NAN"):
                 continue
+            if active_only:
+                # Skip test-case self-reference tickets (TC-*)
+                if any(ticket_id.startswith(p) for p in _TESTCASE_PREFIXES):
+                    continue
+                # Skip resolved/closed issues
+                status = str(item[1]).strip().upper()
+                if status in _RESOLVED_STATUSES:
+                    continue
             parts.append(f"{item[0]} ({item[1]})")
         elif isinstance(item, str):
             if item.strip().upper() not in ("NA", "NONE", "", "NAN"):

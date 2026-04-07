@@ -22,11 +22,11 @@ export interface ScriptNodeData {
 // ---------------------------------------------------------------------------
 
 const STATUS_COLORS: Record<string, { border: string; bg: string; dot: string; text: string; glow: string }> = {
-  pending:  { border: "border-gray-600",   bg: "bg-gray-800/90",    dot: "bg-gray-400",   text: "text-gray-400",  glow: "" },
-  running:  { border: "border-blue-500",   bg: "bg-blue-900/40",    dot: "bg-blue-400",   text: "text-blue-300",  glow: "shadow-blue-500/20 shadow-lg" },
-  success:  { border: "border-green-600",  bg: "bg-green-900/30",   dot: "bg-green-400",  text: "text-green-300", glow: "shadow-green-500/10 shadow-md" },
-  failed:   { border: "border-red-600",    bg: "bg-red-900/30",     dot: "bg-red-400",    text: "text-red-300",   glow: "shadow-red-500/20 shadow-lg" },
-  skipped:  { border: "border-gray-600",   bg: "bg-gray-800/50",    dot: "bg-gray-500",   text: "text-gray-500",  glow: "" },
+  pending:  { border: "border-white/[0.08]",  bg: "bg-[#1a1d28]",           dot: "bg-gray-400",   text: "text-gray-400",  glow: "" },
+  running:  { border: "border-blue-500/40",   bg: "bg-blue-500/[0.06]",     dot: "bg-blue-400",   text: "text-blue-300",  glow: "shadow-blue-500/15 shadow-lg" },
+  success:  { border: "border-green-500/30",  bg: "bg-green-500/[0.04]",    dot: "bg-green-400",  text: "text-green-300", glow: "shadow-green-500/10 shadow-md" },
+  failed:   { border: "border-red-500/30",    bg: "bg-red-500/[0.04]",      dot: "bg-red-400",    text: "text-red-300",   glow: "shadow-red-500/15 shadow-lg" },
+  skipped:  { border: "border-white/[0.06]",  bg: "bg-[#161922]",           dot: "bg-gray-500",   text: "text-gray-500",  glow: "" },
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -66,7 +66,7 @@ function ScriptNode({ data, selected }: NodeProps<ScriptNodeData>) {
         rounded-xl border-2 ${colors.border} ${colors.bg} ${colors.glow}
         min-w-[220px] max-w-[280px] backdrop-blur-sm
         transition-all duration-300 ease-out
-        ${selected ? "ring-2 ring-indigo-500/50 ring-offset-1 ring-offset-gray-950" : ""}
+        ${selected ? "ring-2 ring-indigo-500/40 ring-offset-1 ring-offset-[#0a0c12]" : ""}
         ${status === "running" ? "animate-pulse" : ""}
       `}
     >
@@ -74,11 +74,11 @@ function ScriptNode({ data, selected }: NodeProps<ScriptNodeData>) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-3 !h-3 !bg-gray-500 !border-2 !border-gray-700 hover:!bg-indigo-400 transition"
+        className="!w-3 !h-3 !bg-gray-500 !border-2 !border-[#1a1d28] hover:!bg-indigo-400 transition-colors"
       />
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-gray-800/50">
+      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-white/[0.04]">
         <span className={`h-2.5 w-2.5 rounded-full ${colors.dot} shrink-0 ${
           status === "running" ? "animate-ping" : ""
         }`} />
@@ -94,7 +94,7 @@ function ScriptNode({ data, selected }: NodeProps<ScriptNodeData>) {
 
       {/* Args preview */}
       {visibleArgs.length > 0 && (
-        <div className="px-3.5 py-2 space-y-1 border-b border-gray-800/30">
+        <div className="px-3.5 py-2 space-y-1 border-b border-white/[0.03]">
           {visibleArgs.map(([k, v]) => (
             <div key={k} className="flex items-center gap-1.5 text-[10px] leading-tight">
               <span className="text-gray-500 font-mono shrink-0">{truncate(k, 12)}</span>
@@ -132,7 +132,7 @@ function ScriptNode({ data, selected }: NodeProps<ScriptNodeData>) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!w-3 !h-3 !bg-gray-500 !border-2 !border-gray-700 hover:!bg-indigo-400 transition"
+        className="!w-3 !h-3 !bg-gray-500 !border-2 !border-[#1a1d28] hover:!bg-indigo-400 transition-colors"
       />
     </div>
   );

@@ -1,0 +1,25 @@
+[Unit]
+Description=Perda Backend (FastAPI / uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=__SERVER_USER__
+WorkingDirectory=__PERDA_DIR__/backend
+
+# Load Jenkins / GitHub tokens from .env
+EnvironmentFile=__PERDA_DIR__/backend/.env
+
+# Use the project's own virtualenv
+ExecStart=__PERDA_DIR__/backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Restart automatically on crash; wait 5 s before each retry
+Restart=on-failure
+RestartSec=5
+
+# Log to journald (view with: journalctl -u perda-backend -f)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
