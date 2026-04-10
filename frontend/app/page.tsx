@@ -44,6 +44,22 @@ export default function Home() {
   const [selectedScript, setSelectedScript] = useState<ScriptInfo | null>(null);
   const [scriptsExpanded, setScriptsExpanded] = useState(true);
   const [fetchingScripts, setFetchingScripts] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  // Theme initialiser
+  useEffect(() => {
+    const saved = localStorage.getItem('perda-theme');
+    if (saved === 'light') setTheme('light');
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('perda-theme', next);
+    document.documentElement.classList.toggle('dark', next === 'dark');
+    document.documentElement.classList.toggle('light', next === 'light');
+  }, [theme]);
 
   // Fetch scripts once on mount
   useEffect(() => {
@@ -78,13 +94,29 @@ export default function Home() {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      {/* Floating sidebar toggle when collapsed */}
+      {sidebarCollapsed && (
+        <button
+          onClick={() => setSidebarCollapsed(false)}
+          className="fixed top-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-xl bg-[#1a1d28] border border-white/[0.08] text-gray-400 hover:text-white hover:bg-[#22262f] transition-all shadow-lg"
+          title="Open sidebar"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+          </svg>
+        </button>
+      )}
+
       {/* ---------------------------------------------------------------- */}
       {/* Sidebar                                                          */}
       {/* ---------------------------------------------------------------- */}
-      <aside className="w-[268px] shrink-0 border-r border-white/[0.06] bg-[#0c0e14] flex flex-col">
+      <aside
+        className="shrink-0 border-r border-white/[0.06] bg-[#0c0e14] sidebar-glass flex flex-col transition-all duration-300 overflow-hidden"
+        style={{ width: sidebarCollapsed ? 0 : 268 }}
+      >
         {/* Brand */}
         <div className="px-5 py-5 border-b border-white/[0.06]">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 justify-between">
             <div className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10">
               <svg className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
@@ -97,6 +129,15 @@ export default function Home() {
               <p className="text-[10px] text-gray-500">Perda Automation Platform</p>
             </div>
           </div>
+          <button
+            onClick={() => setSidebarCollapsed(true)}
+            className="text-gray-600 hover:text-gray-300 transition-colors p-1.5 rounded-lg hover:bg-white/[0.06] shrink-0"
+            title="Collapse sidebar"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
+            </svg>
+          </button>
         </div>
 
         {/* Navigation */}
@@ -224,7 +265,24 @@ export default function Home() {
         {/* Footer */}
         <div className="px-5 py-3 border-t border-white/[0.04] flex items-center justify-between">
           <span className="text-[10px] text-gray-600">v0.1.0</span>
-          <span className="flex h-2 w-2 rounded-full bg-green-500/80" title="Backend connected" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg hover:bg-white/[0.06] text-gray-500 hover:text-gray-300 transition-colors"
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              {theme === 'dark' ? (
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+                </svg>
+              ) : (
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                </svg>
+              )}
+            </button>
+            <span className="flex h-2 w-2 rounded-full bg-green-500/80" title="Backend connected" />
+          </div>
         </div>
       </aside>
 
@@ -239,29 +297,29 @@ export default function Home() {
               : "p-6 lg:p-8 xl:p-10"
           }`}
         >
-          <div className={activePage === "scripts" ? "" : "hidden"}>
+          <div className={activePage === "scripts" ? "page-enter" : "hidden"}>
             <ScriptRunner
               scripts={scripts}
               selectedScript={selectedScript}
               onSelectScript={setSelectedScript}
             />
           </div>
-          <div className={activePage === "test-report" ? "" : "hidden"}>
+          <div className={activePage === "test-report" ? "page-enter" : "hidden"}>
             <TestReportDashboard />
           </div>
-          <div className={activePage === "confidence" ? "" : "hidden"}>
+          <div className={activePage === "confidence" ? "page-enter" : "hidden"}>
             <ConfidenceDashboard />
           </div>
-          <div className={activePage === "tc-analysis" ? "" : "hidden"}>
+          <div className={activePage === "tc-analysis" ? "page-enter" : "hidden"}>
             <TCAnalysis />
           </div>
-          <div className={activePage === "history" ? "" : "hidden"}>
+          <div className={activePage === "history" ? "page-enter" : "hidden"}>
             <RunHistory />
           </div>
-          <div className={activePage === "workflows" ? "" : "hidden"}>
+          <div className={activePage === "workflows" ? "page-enter" : "hidden"}>
             <WorkflowBuilder />
           </div>
-          <div className={activePage === "workflow-runs" ? "" : "hidden"}>
+          <div className={activePage === "workflow-runs" ? "page-enter" : "hidden"}>
             <WorkflowExecution />
           </div>
         </div>
@@ -296,9 +354,9 @@ function SidebarItem({
   const base =
     "flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all duration-150";
   const activeClass =
-    "bg-indigo-500/10 text-indigo-300 border border-indigo-500/10";
+    "bg-indigo-500/10 text-indigo-300 border border-indigo-500/10 sidebar-active-glow";
   const defaultClass =
-    "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200 border border-transparent";
+    "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200 border border-transparent hover-scale";
   const disabledClass = "text-gray-600 cursor-not-allowed border border-transparent";
 
   return (

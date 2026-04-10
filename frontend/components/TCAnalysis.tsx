@@ -100,6 +100,30 @@ export default function TCAnalysis() {
   const [dlAutoStatus, setDlAutoStatus] = useState<"idle" | "checking" | "downloading" | "loading" | "done" | "error">("idle");
   const [dlMatchedService, setDlMatchedService] = useState("");
 
+  // ── AI Analysis state ──
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState("");
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiExpanded, setAiExpanded] = useState(true);
+  const [aiModel, setAiModel] = useState("qwen2.5-coder:7b");
+  const [aiModels, setAiModels] = useState<{id:string;label:string;size:string}[]>([]);
+  const [aiElapsed, setAiElapsed] = useState(0);
+  const [aiStatus, setAiStatus] = useState<string>(""); // "processing" | "streaming" | ""
+  const [aiDeepProgress, setAiDeepProgress] = useState<{phase:string; chunk:number; total:number; label?:string; status?:string; preview?:string}|null>(null);
+  const aiRef = useRef<HTMLDivElement>(null);
+  const aiTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Fetch available AI models on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/tc-analysis/ai/models`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.models) setAiModels(d.models);
+        if (d.default) setAiModel(d.default);
+      })
+      .catch(() => {});
+  }, []);
+
   const fetchSource = useCallback(async (branchName: string, fileName: string) => {
     if (!branchName || !fileName) return;
     setSourceLoading(true);
@@ -440,26 +464,30 @@ export default function TCAnalysis() {
       return;
     }
 
-    // Step 3 — collect ALL files that belong to this service.
-    // Files are named like: apm.txt_out → "apm", apm_c.txt_out → "apm_c"
-    // Match: exact ("apm" == service) OR starts-with + underscore ("apm_c" starts with "apm_")
-    // This ensures we get both normal and critical log files.
-    const serviceFiles = service
-      ? files.filter(f => {
-          const fu = f.toUpperCase();
-          return fu === service || fu.startsWith(service + "_");
-        })
+    // Step 3 — Default: select ONLY the exact service match (e.g. "apm").
+    // The "_c" (critical) and other variants are available via checkboxes
+    // but not selected by default.
+    const exactMatch = service
+      ? files.filter(f => f.toUpperCase() === service)
       : [];
 
-    // If no exact match, try broader fallback: any file containing the service name
-    const serviceArr = serviceFiles.length > 0
-      ? serviceFiles
-      : service
-        ? files.filter(f => f.toUpperCase().includes(service))
-        : files;
+    // Fallback: if no exact match, try files containing the service name
+    const fallbackMatch = exactMatch.length === 0 && service
+      ? files.filter(f => f.toUpperCase().includes(service))
+      : [];
 
-    const displayLabel = serviceFiles.length > 0 ? service : (serviceArr.length > 0 ? `~${service}` : "all");
-    setDlSelectedServices(new Set(serviceArr));
+    const defaultSelected = exactMatch.length > 0
+      ? exactMatch
+      : fallbackMatch.length > 0
+        ? fallbackMatch
+        : [];
+
+    const displayLabel = exactMatch.length > 0
+      ? service
+      : fallbackMatch.length > 0
+        ? `~${service}`
+        : "none";
+    setDlSelectedServices(new Set(defaultSelected));
     setDlMatchedService(displayLabel);
 
     // Step 4 — load ALL service logs; dlSelectedServices drives the display filter
@@ -497,6 +525,373 @@ export default function TCAnalysis() {
     acc[l.service] = (acc[l.service] ?? 0) + 1;
     return acc;
   }, {});
+
+  // ── AI Analysis ──
+  const runAiAnalysis = useCallback(async () => {
+    if (!data) return;
+    setAiLoading(true);
+    setAiResult("");
+    setAiError(null);
+    setAiExpanded(true);
+    setAiElapsed(0);
+    setAiStatus("processing");
+    if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+    const t0 = Date.now();
+    aiTimerRef.current = setInterval(() => setAiElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+
+    // ── SMART FILTERING: send only the critical window of data ──
+
+    // 1. Steps — send all (they're small)
+    const stepsText = (data.steps || []).map(s => {
+      const [desc, status] = Object.entries(s)[0] ?? ["", ""];
+      return `[${String(status).padEnd(5)}] ${desc}`;
+    }).join("\n");
+
+    // 2. Find the failed step(s)
+    const failedSteps = (data.steps || []).filter(s => {
+      const status = String(Object.values(s)[0] ?? "").trim().toUpperCase();
+      return status === "FAIL" || status === "FALSE" || status === "0";
+    });
+    const failedStep = failedSteps.map(s => {
+      const [desc, status] = Object.entries(s)[0] ?? ["", ""];
+      return `[${status}] ${desc}`;
+    }).join("\n") || "(no explicit failed step found)";
+
+    // 3. Automation logs — find failure boundary and take context around it
+    //    Strategy: find the LAST line containing fail/error/assert/exception/traceback,
+    //    then take 50 lines BEFORE and 20 lines AFTER that point.
+    //    If no such line found, take the last 100 lines.
+    const autoLogsArr = data.logs;
+    let failLineIdx = -1;
+    const failPatterns = /\b(fail|error|exception|assert|traceback|timeout|refused|abort)\b/i;
+    for (let i = autoLogsArr.length - 1; i >= 0; i--) {
+      if (failPatterns.test(autoLogsArr[i])) {
+        failLineIdx = i;
+        break;
+      }
+    }
+    let autoLogSlice: string[];
+    if (failLineIdx >= 0) {
+      const start = Math.max(0, failLineIdx - 50);
+      const end = Math.min(autoLogsArr.length, failLineIdx + 20);
+      autoLogSlice = autoLogsArr.slice(start, end);
+      // Annotate where the failure line is
+      const relIdx = failLineIdx - start;
+      autoLogSlice[relIdx] = `>>> ${autoLogSlice[relIdx]}`;
+    } else {
+      // No obvious failure line — send last 100 lines
+      autoLogSlice = autoLogsArr.slice(-100);
+    }
+    const autoLogs = autoLogSlice.join("\n");
+
+    // 4. Device logs — ±30 sec window around the test's end_time
+    //    end_time is when the failure happened
+    let devLogSlice: DeviceLogEntry[] = [];
+    const endTimeMs = data.end_time ? new Date(data.end_time.replace(" ", "T") + "Z").getTime() : null;
+    if (endTimeMs && !isNaN(endTimeMs)) {
+      const windowMs = 30_000; // ±30 seconds
+      devLogSlice = dlFilteredLogs.filter(e =>
+        e.epoch_ms != null &&
+        e.epoch_ms >= endTimeMs - windowMs &&
+        e.epoch_ms <= endTimeMs + windowMs
+      );
+      // If window is empty (timestamp mismatch), try last 60 entries
+      if (devLogSlice.length === 0) {
+        devLogSlice = dlFilteredLogs.slice(-60);
+      }
+    } else {
+      // No timestamp available — take last 60 entries
+      devLogSlice = dlFilteredLogs.slice(-60);
+    }
+    // Cap at 200 entries max
+    if (devLogSlice.length > 200) devLogSlice = devLogSlice.slice(-200);
+    const devLogs = devLogSlice.map(e => {
+      const ts = e.epoch_ms ? new Date(e.epoch_ms).toISOString().replace("T", " ").slice(0, 19) : "—";
+      return `${ts}  ${e.service}  ${e.level}  ${parseDlMessage(e.line)}`;
+    }).join("\n");
+
+    // 5. Source code — extract only the test function if possible
+    let testCode = sourceData?.source_code ?? "(source code not available)";
+    if (sourceData?.source_code && data.file_name) {
+      // Try to extract the test function: look for "def test_..." or the TC class
+      const lines = sourceData.source_code.split("\n");
+      const tcName = data.tc_id.toLowerCase().replace(/-/g, "_");
+      // Find function start
+      let funcStart = -1;
+      let funcEnd = lines.length;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].toLowerCase();
+        if (line.includes("def ") && line.includes("test") && (line.includes(tcName) || funcStart === -1)) {
+          if (funcStart !== -1 && line.includes(tcName)) {
+            // Found exact match, override
+            funcStart = i;
+          } else if (funcStart === -1) {
+            funcStart = i;
+          }
+        }
+      }
+      if (funcStart >= 0) {
+        // Find function end: next def/class at same or lower indent, or EOF
+        const baseIndent = lines[funcStart].search(/\S/);
+        for (let i = funcStart + 1; i < lines.length; i++) {
+          const trimmed = lines[i].trimStart();
+          if (trimmed === "") continue;
+          const indent = lines[i].search(/\S/);
+          if (indent <= baseIndent && (trimmed.startsWith("def ") || trimmed.startsWith("class "))) {
+            funcEnd = i;
+            break;
+          }
+        }
+        // Include 5 lines before for imports/decorators
+        const contextStart = Math.max(0, funcStart - 5);
+        testCode = `(Extracted test function, lines ${contextStart + 1}-${funcEnd})\n` +
+          lines.slice(contextStart, funcEnd).join("\n");
+      }
+      // If extracted code is still huge (>300 lines), truncate
+      const extractedLines = testCode.split("\n");
+      if (extractedLines.length > 300) {
+        testCode = extractedLines.slice(0, 300).join("\n") + "\n... (truncated at 300 lines)";
+      }
+    }
+
+    // Log what we're sending (for debugging in browser console)
+    console.log(`[AI] Sending: steps=${stepsText.split("\\n").length}, autoLogs=${autoLogSlice.length} lines, devLogs=${devLogSlice.length} entries, code=${testCode.split("\\n").length} lines`);
+
+    try {
+      const res = await fetch(`${API_BASE}/tc-analysis/ai`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          test_steps: stepsText,
+          failed_step: failedStep,
+          automation_logs: autoLogs,
+          device_logs: devLogs,
+          test_code: testCode,
+          model: aiModel,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const dataLine = part.split("\n").find(l => l.startsWith("data: "));
+          if (!dataLine) continue;
+          try {
+            const ev = JSON.parse(dataLine.slice(6));
+            if (ev.error) {
+              setAiError(ev.error);
+              if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+              setAiLoading(false);
+              setAiStatus("");
+              return;
+            }
+            if (ev.status === "processing" && !ev.token) {
+              setAiStatus("processing");
+              continue;
+            }
+            if (ev.token) {
+              setAiStatus("streaming");
+              setAiResult(prev => prev + ev.token);
+            }
+            if (ev.done) {
+              if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+              setAiLoading(false);
+              setAiStatus("");
+              return;
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+      setAiLoading(false);
+      setAiStatus("");
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "AI analysis failed");
+      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+      setAiLoading(false);
+      setAiStatus("");
+    }
+  }, [data, dlFilteredLogs, sourceData, aiModel]);
+
+  // ── Deep Analysis (Map-Reduce) ──
+  const runDeepAnalysis = useCallback(async () => {
+    if (!data) return;
+    setAiLoading(true);
+    setAiResult("");
+    setAiError(null);
+    setAiExpanded(true);
+    setAiElapsed(0);
+    setAiStatus("deep");
+    setAiDeepProgress(null);
+    if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+    const t0 = Date.now();
+    aiTimerRef.current = setInterval(() => setAiElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+
+    // Send ALL data — no smart filtering, the backend will chunk it
+    const stepsText = (data.steps || []).map(s => {
+      const [desc, status] = Object.entries(s)[0] ?? ["", ""];
+      return `[${String(status).padEnd(5)}] ${desc}`;
+    }).join("\n");
+
+    const failedStep = (data.steps || []).filter(s => {
+      const status = String(Object.values(s)[0] ?? "").trim().toUpperCase();
+      return status === "FAIL" || status === "FALSE" || status === "0";
+    }).map(s => {
+      const [desc, status] = Object.entries(s)[0] ?? ["", ""];
+      return `[${status}] ${desc}`;
+    }).join("\n") || "(no explicit failed step found)";
+
+    // ALL automation logs
+    const autoLogs = data.logs.join("\n");
+
+    // ALL device logs (unfiltered from dlLogs, not dlFilteredLogs)
+    const devLogs = dlLogs.map(e => {
+      const ts = e.epoch_ms ? new Date(e.epoch_ms).toISOString().replace("T", " ").slice(0, 19) : "—";
+      return `${ts}  ${e.service}  ${e.level}  ${parseDlMessage(e.line)}`;
+    }).join("\n");
+
+    // Full source code
+    const testCode = sourceData?.source_code ?? "(source code not available)";
+
+    console.log(`[Deep AI] Sending ALL data: autoLogs=${data.logs.length} lines, devLogs=${dlLogs.length} entries, code=${testCode.split("\\n").length} lines`);
+
+    try {
+      const res = await fetch(`${API_BASE}/tc-analysis/ai/deep`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          test_steps: stepsText,
+          failed_step: failedStep,
+          automation_logs: autoLogs,
+          device_logs: devLogs,
+          test_code: testCode,
+          model: aiModel,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const dataLine = part.split("\n").find(l => l.startsWith("data: "));
+          if (!dataLine) continue;
+          try {
+            const ev = JSON.parse(dataLine.slice(6));
+            if (ev.error) {
+              setAiError(ev.error);
+              if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+              setAiLoading(false);
+              setAiStatus("");
+              setAiDeepProgress(null);
+              return;
+            }
+            // Map phase progress
+            if (ev.phase === "map") {
+              setAiDeepProgress({
+                phase: "map",
+                chunk: ev.chunk ?? 0,
+                total: ev.total ?? 0,
+                label: ev.label,
+                status: ev.status,
+                preview: ev.summary_preview,
+              });
+              continue;
+            }
+            // Reduce phase
+            if (ev.phase === "reduce") {
+              if (ev.status === "starting") {
+                setAiDeepProgress({ phase: "reduce", chunk: 0, total: 0, status: "starting" });
+                setAiStatus("streaming");
+                continue;
+              }
+              if (ev.token) {
+                setAiResult(prev => prev + ev.token);
+              }
+              if (ev.done) {
+                if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+                setAiLoading(false);
+                setAiStatus("");
+                setAiDeepProgress(null);
+                return;
+              }
+            }
+          } catch { /* ignore */ }
+        }
+      }
+      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+      setAiLoading(false);
+      setAiStatus("");
+      setAiDeepProgress(null);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "Deep analysis failed");
+      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+      setAiLoading(false);
+      setAiStatus("");
+      setAiDeepProgress(null);
+    }
+  }, [data, dlLogs, sourceData, aiModel]);
+
+  // ── Open current tab content in a new browser window ──
+  const openTabInNewWindow = (tabName: string) => {
+    if (!data) return;
+    const isDark = !document.documentElement.classList.contains('light');
+    let content = '';
+    let title = '';
+
+    if (tabName === 'log') {
+      title = `Automation Log — ${data.tc_id} — Build #${data.build}`;
+      content = filteredLogs.join('\n');
+    } else if (tabName === 'source' && sourceData) {
+      title = `Source — ${sourceData.file_name} — ${sourceData.branch}`;
+      content = sourceData.source_code;
+    } else if (tabName === 'device-log') {
+      title = `Device Logs — ${data.device_id} — ${dlDate}`;
+      content = dlFilteredLogs.map(e => {
+        const ts = e.epoch_ms ? new Date(e.epoch_ms).toISOString().replace('T', ' ').slice(0, 19) : '—';
+        return `${ts}  ${e.service.padEnd(12)}  ${e.level}  ${parseDlMessage(e.line)}`;
+      }).join('\n');
+    } else if (tabName === 'steps') {
+      title = `Executed Steps — ${data.tc_id}`;
+      content = (data.steps || []).map(s => {
+        const [desc, status] = Object.entries(s)[0] ?? ['', ''];
+        return `[${String(status).padEnd(5)}] ${desc}`;
+      }).join('\n');
+    } else if (tabName === 'ai') {
+      title = `AI Analysis — ${data.tc_id} — Build #${data.build}`;
+      content = aiResult;
+    } else return;
+
+    const escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html>
+<html><head><title>${title}</title><style>
+  body { margin:0; padding:24px 32px; font-family:'SF Mono','JetBrains Mono','Fira Code','Consolas',monospace; font-size:13px; line-height:1.7; white-space:pre-wrap; word-wrap:break-word; background:${isDark ? '#0f1117' : '#fff'}; color:${isDark ? '#d1d5db' : '#374151'}; }
+  h1 { font-family:-apple-system,system-ui,sans-serif; font-size:16px; font-weight:600; margin:0 0 16px; padding-bottom:12px; border-bottom:1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}; color:${isDark ? '#fff' : '#111827'}; }
+</style></head><body><h1>${title}</h1>${escaped}</body></html>`);
+    win.document.close();
+  };
 
   return (
     <div className="max-w-[1600px] mx-auto">
@@ -798,6 +1193,20 @@ export default function TCAnalysis() {
                   </span>
                 )}
               </button>
+
+              {/* Open in new tab button */}
+              <div className="ml-auto pr-3">
+                <button
+                  onClick={() => openTabInNewWindow(activeTab)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] border border-white/10 text-[11px] font-medium text-gray-500 hover:bg-white/[0.1] hover:text-gray-200 transition-all duration-150"
+                  title="Open in new tab"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                  </svg>
+                  New Tab
+                </button>
+              </div>
             </div>
 
             {/* ── Automation Log Tab ── */}
@@ -1229,7 +1638,7 @@ export default function TCAnalysis() {
                     />
                   </div>
                   {/* Service filter */}
-                  {Object.keys(dlServiceCounts).length > 1 && (
+                  {Object.keys(dlServiceCounts).length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[10px] text-gray-600 mr-1">Service:</span>
                     {Object.entries(dlServiceCounts)
@@ -1243,7 +1652,7 @@ export default function TCAnalysis() {
                             return n;
                           })}
                           className={`text-[10px] px-2 py-0.5 rounded-md border transition-all duration-150 font-mono ${
-                            dlSelectedServices.size === 0 || dlSelectedServices.has(svc)
+                            dlSelectedServices.has(svc)
                               ? "bg-sky-500/10 text-sky-300 border-sky-500/30"
                               : "bg-white/[0.02] text-gray-700 border-white/[0.04] opacity-40"
                           }`}
@@ -1253,6 +1662,11 @@ export default function TCAnalysis() {
                       ))}
                     {dlSelectedServices.size > 0 && (
                       <button onClick={() => setDlSelectedServices(new Set())} className="text-[10px] text-gray-600 hover:text-gray-400 ml-1 transition-colors">
+                        Clear
+                      </button>
+                    )}
+                    {dlSelectedServices.size < Object.keys(dlServiceCounts).length && (
+                      <button onClick={() => setDlSelectedServices(new Set(Object.keys(dlServiceCounts)))} className="text-[10px] text-gray-600 hover:text-gray-400 ml-1 transition-colors">
                         All
                       </button>
                     )}
@@ -1367,6 +1781,217 @@ export default function TCAnalysis() {
                   </div>
                 )}
               </>
+            )}
+          </div>
+
+          {/* ── AI Analysis Section ── */}
+          <div className="rounded-xl border border-purple-500/20 bg-[#161922] overflow-hidden">
+            {/* AI Header + Button */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/10">
+                  <svg className="h-4 w-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-purple-300">AI Analysis</h3>
+                  <p className="text-[10px] text-gray-600">Powered by Ollama</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Model selector */}
+                {aiModels.length > 0 && (
+                  <select
+                    value={aiModel}
+                    onChange={e => setAiModel(e.target.value)}
+                    disabled={aiLoading}
+                    className="bg-white/[0.06] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] font-medium text-gray-300 outline-none focus:border-purple-500/50 transition-colors disabled:opacity-50"
+                  >
+                    {aiModels.map(m => (
+                      <option key={m.id} value={m.id} className="bg-[#1a1d28] text-gray-200">
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {aiResult && (
+                  <button
+                    onClick={() => setAiExpanded(prev => !prev)}
+                    className="p-1.5 rounded-lg hover:bg-white/[0.06] text-gray-500 hover:text-gray-300 transition-colors"
+                  >
+                    <svg className={`h-4 w-4 transition-transform duration-200 ${aiExpanded ? "" : "-rotate-90"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  onClick={runAiAnalysis}
+                  disabled={aiLoading}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-[12px] font-semibold text-white shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Smart-filtered analysis (fast)"
+                >
+                  {aiLoading && aiStatus !== "deep" ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Analysing…
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+                      </svg>
+                      Fast
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={runDeepAnalysis}
+                  disabled={aiLoading}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-cyan-600 text-[12px] font-semibold text-white shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Map-Reduce deep analysis (analyzes all data in chunks)"
+                >
+                  {aiLoading && aiStatus === "deep" ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Deep…
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                      </svg>
+                      Deep
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* AI Error */}
+            {aiError && (
+              <div className="px-5 py-3 border-b border-white/[0.06] bg-red-500/[0.05]">
+                <div className="flex items-center gap-2 text-sm text-red-400">
+                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  </svg>
+                  {aiError}
+                </div>
+              </div>
+            )}
+
+            {/* AI Loading placeholder */}
+            {aiLoading && !aiResult && (
+              <div className="px-5 py-6">
+                {/* Deep analysis chunk progress */}
+                {aiDeepProgress && aiDeepProgress.phase === "map" ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400 font-medium">Analyzing chunks… ({aiElapsed}s)</span>
+                      <span className="text-indigo-400 font-mono text-xs">{aiDeepProgress.chunk}/{aiDeepProgress.total}</span>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-indigo-500 to-cyan-500 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${aiDeepProgress.total > 0 ? (aiDeepProgress.chunk / aiDeepProgress.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                    {/* Current chunk label */}
+                    {aiDeepProgress.label && (
+                      <div className="flex items-center gap-2 text-xs">
+                        {aiDeepProgress.status === "processing" ? (
+                          <svg className="h-3.5 w-3.5 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <svg className="h-3.5 w-3.5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                          </svg>
+                        )}
+                        <span className="text-gray-500">{aiDeepProgress.label}</span>
+                        {aiDeepProgress.preview && (
+                          <span className="text-gray-700 truncate max-w-[300px]">— {aiDeepProgress.preview}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : aiDeepProgress && aiDeepProgress.phase === "reduce" && !aiResult ? (
+                  <div className="flex items-center justify-center gap-3 py-4 text-gray-500">
+                    <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span className="text-sm">Synthesizing findings into root cause analysis… ({aiElapsed}s)</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-3 py-4 text-gray-500">
+                    <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span className="text-sm">
+                      {aiStatus === "processing"
+                        ? `Model is loading & processing prompt… (${aiElapsed}s)`
+                        : `AI is generating response… (${aiElapsed}s)`
+                      }
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* AI Result */}
+            {aiResult && aiExpanded && (
+              <div ref={aiRef} className="px-5 py-4 overflow-auto" style={{ maxHeight: "calc(100vh - 300px)" }}>
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <pre className="whitespace-pre-wrap break-words text-[13px] leading-relaxed font-mono text-gray-300 bg-transparent p-0 m-0">
+                    {aiResult}
+                    {aiLoading && <span className="inline-block animate-pulse text-purple-400">▊</span>}
+                  </pre>
+                </div>
+                {!aiLoading && aiResult && (
+                  <div className="flex items-center gap-2 mt-4 pt-3 border-t border-white/[0.06]">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(aiResult);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] border border-white/10 text-[11px] font-medium text-gray-300 hover:bg-white/[0.1] hover:text-white transition-all duration-150"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                      </svg>
+                      Copy
+                    </button>
+                    <button
+                      onClick={() => {
+                        openTabInNewWindow("ai");
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] border border-white/10 text-[11px] font-medium text-gray-300 hover:bg-white/[0.1] hover:text-white transition-all duration-150"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                      Open in New Tab
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!aiResult && !aiLoading && !aiError && (
+              <div className="px-5 py-8 text-center text-gray-600">
+                <p className="text-sm">Click &ldquo;Fast&rdquo; for quick smart-filtered analysis, or &ldquo;Deep&rdquo; to analyze all data in chunks (slower but thorough).</p>
+                <p className="text-[11px] mt-1 text-gray-700">Uses execution steps, automation logs, device logs, and source code.</p>
+              </div>
             )}
           </div>
         </div>

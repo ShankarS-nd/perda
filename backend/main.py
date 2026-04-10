@@ -29,6 +29,9 @@ Device Logs endpoints:
 import json
 from pathlib import Path
 from typing import Any
+import logging
+
+logger = logging.getLogger("uvicorn.error")
 
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file (JENKINS_USER, JENKINS_TOKEN, etc.)
@@ -1197,6 +1200,27 @@ class DeviceLogReadRequest(BaseModel):
     search: str = ""           # substring filter
 
 
+@app.get("/aws-sso/status")
+async def aws_sso_status():
+    """Check if the AWS SSO token for the s3view profile is still valid."""
+    import shutil as _sh
+    aws_bin = _sh.which("aws")
+    if not aws_bin:
+        return {"valid": False, "error": "aws CLI not found"}
+    try:
+        result = _subprocess.run(
+            [aws_bin, "sts", "get-caller-identity", "--profile", "s3view"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return {"valid": True}
+        # Extract meaningful error
+        err = result.stderr.strip() or result.stdout.strip()
+        return {"valid": False, "error": err[:200]}
+    except Exception as e:
+        return {"valid": False, "error": str(e)[:200]}
+
+
 @app.post("/device-logs/download")
 async def device_log_download(payload: DeviceLogDownloadRequest):
     """Run logs_download.py for a device/date and stream output via SSE."""
@@ -1226,9 +1250,14 @@ async def device_log_download(payload: DeviceLogDownloadRequest):
                 except Exception:
                     pass
             current_paths = env.get("PATH", "").split(":")
-            env["PATH"] = ":".join(
-                p for p in (extra_paths + current_paths) if p and p not in current_paths[1:]
-            )
+            # Build a deduplicated PATH with extra_paths prepended.
+            seen: set[str] = set()
+            merged: list[str] = []
+            for p in (extra_paths + current_paths):
+                if p and p not in seen:
+                    seen.add(p)
+                    merged.append(p)
+            env["PATH"] = ":".join(merged)
             aws_bin = _shutil.which("aws", path=env["PATH"])
             if not aws_bin:
                 yield f"data: {json.dumps({'type': 'stdout', 'text': 'ERROR: aws CLI not found in PATH. Install awscli and try again.'})}\n\n"
@@ -1344,3 +1373,384 @@ async def read_device_logs(payload: DeviceLogReadRequest):
             })
 
     return {"count": len(result), "logs": result}
+
+
+# ---------------------------------------------------------------------------
+# AI Analysis — Ollama integration for TC failure analysis
+# ---------------------------------------------------------------------------
+
+OLLAMA_BASE = "http://localhost:11434"
+OLLAMA_MODEL = "qwen2.5-coder:7b"
+
+AI_SYSTEM_PROMPT = (
+    "You are a senior QA automation engineer debugging a failed TV set-top-box test case. "
+    "Analyze the provided logs, test steps, and code to find the root cause of the failure. "
+    "Rules: (1) Be specific — cite exact log lines, timestamps, error messages. "
+    "(2) Do NOT give generic advice. (3) If data is missing, say so explicitly."
+)
+
+AI_USER_TEMPLATE = """A test case FAILED. Analyze the data below and determine the root cause.
+
+FAILED STEP:
+{failed_step}
+
+TEST STEPS (execution sequence):
+{test_steps}
+
+AUTOMATION LOGS (stderr/stdout from test runner):
+{automation_logs}
+
+DEVICE LOGS (from the set-top-box around the time of failure):
+{device_logs}
+
+TEST SOURCE CODE:
+{test_code}
+
+---
+Respond with this structure:
+
+## Root Cause
+Identify the exact failure reason. Quote specific log lines or error messages as evidence.
+
+## What Happened (Timeline)
+Step-by-step breakdown of events leading to failure.
+
+## Possible Causes (Ranked)
+1. **[High]** ...
+2. **[Medium]** ...
+3. **[Low]** ...
+
+## Suggested Fixes
+Actionable recommendations. Include code changes if applicable.
+
+## Confidence: High / Medium / Low
+Explain why.
+"""
+
+
+OLLAMA_MODELS = [
+    {"id": "qwen2.5-coder:3b", "label": "Qwen 3B (fast)", "size": "~2 GB"},
+    {"id": "qwen2.5-coder:7b", "label": "Qwen 7B (balanced)", "size": "~4.7 GB"},
+]
+
+
+class AiAnalysisRequest(BaseModel):
+    test_steps: str = ""
+    failed_step: str = ""
+    automation_logs: str = ""
+    device_logs: str = ""
+    test_code: str = ""
+    model: str = OLLAMA_MODEL  # allow frontend to override
+
+
+@app.get("/tc-analysis/ai/models")
+async def tc_analysis_ai_models():
+    """Return available AI models."""
+    return {"models": OLLAMA_MODELS, "default": OLLAMA_MODEL}
+
+
+@app.post("/tc-analysis/ai")
+async def tc_analysis_ai(payload: AiAnalysisRequest):
+    """Stream AI analysis of a failed TC via Ollama."""
+    import httpx
+
+    user_prompt = AI_USER_TEMPLATE.format(
+        test_steps=payload.test_steps or "(not available)",
+        failed_step=payload.failed_step or "(not available)",
+        automation_logs=payload.automation_logs or "(not available)",
+        device_logs=payload.device_logs or "(not available)",
+        test_code=payload.test_code or "(not available)",
+    )
+
+    # Data is already smart-filtered by frontend; apply safety truncation.
+    MAX_SECTION = 3000 if "3b" in (payload.model or OLLAMA_MODEL) else 5000
+    for field_name in ("automation_logs", "device_logs", "test_code"):
+        val = getattr(payload, field_name, "")
+        if len(val) > MAX_SECTION:
+            truncated = val[:MAX_SECTION] + f"\n... (truncated, {len(val)} chars total)"
+            user_prompt = user_prompt.replace(val, truncated)
+
+    # Context size: keep small for fast prompt processing on CPU
+    ctx_size = 4096 if "3b" in (payload.model or OLLAMA_MODEL) else 8192
+    max_tokens = 2048 if "3b" in (payload.model or OLLAMA_MODEL) else 4096
+    logger.info(f"AI analysis: model={payload.model or OLLAMA_MODEL}, prompt_len={len(user_prompt)}, ctx={ctx_size}")
+
+    async def stream():
+        # Send an initial event so the frontend knows we're alive
+        yield f"data: {json.dumps({'token': '', 'done': False, 'status': 'processing'})}\n\n"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+                async with client.stream(
+                    "POST",
+                    f"{OLLAMA_BASE}/api/chat",
+                    json={
+                        "model": payload.model or OLLAMA_MODEL,
+                        "messages": [
+                            {"role": "system", "content": AI_SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "stream": True,
+                        "options": {
+                            "temperature": 0.3,
+                            "num_predict": max_tokens,
+                            "num_ctx": ctx_size,
+                        },
+                    },
+                ) as resp:
+                    if resp.status_code != 200:
+                        body = await resp.aread()
+                        yield f"data: {json.dumps({'error': f'Ollama returned HTTP {resp.status_code}: {body.decode()[:300]}'})}\n\n"
+                        return
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                            token = chunk.get("message", {}).get("content", "")
+                            done = chunk.get("done", False)
+                            yield f"data: {json.dumps({'token': token, 'done': done})}\n\n"
+                            if done:
+                                return
+                        except json.JSONDecodeError:
+                            pass
+        except httpx.ConnectError:
+            yield f"data: {json.dumps({'error': 'Cannot connect to Ollama at ' + OLLAMA_BASE + '. Is it running?'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Deep AI Analysis — Map-Reduce approach
+# ---------------------------------------------------------------------------
+
+DEEP_MAP_PROMPT = """You are analyzing a CHUNK of data from a failed set-top-box test case.
+Summarize ONLY what is relevant to the failure. Focus on:
+- Errors, exceptions, unexpected values
+- State changes (values going from expected to unexpected)
+- Timing anomalies
+- Any line that looks abnormal even if not flagged as error
+
+Be concise. Output a bullet-point summary of findings. If nothing relevant, say "No relevant findings in this chunk."
+"""
+
+DEEP_REDUCE_PROMPT = """You are a senior QA engineer. Multiple chunks of data from a failed test case have been analyzed independently.
+Below are the summaries from each chunk, plus the test steps and failed step info.
+
+YOUR TASK: Synthesize all chunk summaries into a final root cause analysis.
+
+FAILED STEP:
+{failed_step}
+
+TEST STEPS:
+{test_steps}
+
+--- CHUNK SUMMARIES ---
+{chunk_summaries}
+
+---
+Respond with this structure:
+
+## Root Cause
+Identify the exact failure reason. Reference specific findings from the chunk summaries.
+
+## What Happened (Timeline)
+Step-by-step breakdown of events leading to failure.
+
+## Possible Causes (Ranked)
+1. **[High]** ...
+2. **[Medium]** ...
+3. **[Low]** ...
+
+## Suggested Fixes
+Actionable recommendations.
+
+## Confidence: High / Medium / Low
+Explain why.
+"""
+
+
+class DeepAiRequest(BaseModel):
+    test_steps: str = ""
+    failed_step: str = ""
+    automation_logs: str = ""
+    device_logs: str = ""
+    test_code: str = ""
+    model: str = OLLAMA_MODEL
+
+
+@app.post("/tc-analysis/ai/deep")
+async def tc_analysis_ai_deep(payload: DeepAiRequest):
+    """Deep AI analysis using Map-Reduce: chunk all data, summarize each, then synthesize."""
+    import httpx
+
+    model = payload.model or OLLAMA_MODEL
+    ctx_size = 4096 if "3b" in model else 8192
+    # Much larger chunks to keep total manageable (target 8-12 chunks max)
+    MAX_CHUNKS_PER_SECTION = 4   # max chunks per data section
+    MAX_TOTAL_CHUNKS = 12        # absolute cap
+    CHUNK_SIZE = 6000 if "3b" in model else 10000  # chars per chunk
+
+    chunks: list[dict] = []
+
+    def add_chunks(label: str, text: str, max_parts: int = MAX_CHUNKS_PER_SECTION):
+        if not text or text == "(not available)" or len(text.strip()) < 20:
+            return
+        lines = text.split("\n")
+        total_chars = len(text)
+
+        # If text fits in max_parts chunks, chunk normally
+        if total_chars <= CHUNK_SIZE * max_parts:
+            chars = 0
+            batch: list[str] = []
+            part = 1
+            for line in lines:
+                if chars + len(line) > CHUNK_SIZE and batch:
+                    chunks.append({"label": f"{label} (part {part})", "content": "\n".join(batch)})
+                    batch = []
+                    chars = 0
+                    part += 1
+                batch.append(line)
+                chars += len(line) + 1
+            if batch:
+                chunks.append({"label": f"{label} (part {part})", "content": "\n".join(batch)})
+        else:
+            # Data too large — evenly sample max_parts chunks across the data
+            # Always include first and last portions, sample middle
+            lines_per_chunk = max(1, len(lines) // max_parts)
+            for p in range(max_parts):
+                start_idx = p * (len(lines) // max_parts)
+                end_idx = min(start_idx + lines_per_chunk, len(lines))
+                chunk_lines = lines[start_idx:end_idx]
+                # Trim to CHUNK_SIZE chars
+                content = ""
+                for l in chunk_lines:
+                    if len(content) + len(l) + 1 > CHUNK_SIZE:
+                        break
+                    content += l + "\n"
+                if content.strip():
+                    chunks.append({
+                        "label": f"{label} (part {p + 1}/{max_parts}, lines {start_idx+1}-{end_idx})",
+                        "content": content.strip(),
+                    })
+
+    add_chunks("AUTOMATION LOGS", payload.automation_logs)
+    add_chunks("DEVICE LOGS", payload.device_logs)
+    add_chunks("TEST SOURCE CODE", payload.test_code, max_parts=2)  # code rarely needs many chunks
+
+    # Hard cap
+    if len(chunks) > MAX_TOTAL_CHUNKS:
+        chunks = chunks[:MAX_TOTAL_CHUNKS]
+
+    total_chunks = len(chunks)
+    logger.info(f"Deep AI: model={model}, total_chunks={total_chunks}, ctx={ctx_size}")
+
+    async def ollama_chat(client: httpx.AsyncClient, system: str, user: str, max_tokens: int = 1024) -> str:
+        resp = await client.post(
+            f"{OLLAMA_BASE}/api/chat",
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": max_tokens,
+                    "num_ctx": ctx_size,
+                },
+            },
+            timeout=300.0,
+        )
+        if resp.status_code != 200:
+            raise Exception(f"Ollama HTTP {resp.status_code}: {resp.text[:200]}")
+        return resp.json().get("message", {}).get("content", "")
+
+    async def deep_stream():
+        yield f"data: {json.dumps({'phase': 'map', 'chunk': 0, 'total': total_chunks, 'status': 'starting'})}\n\n"
+
+        if total_chunks == 0:
+            yield f"data: {json.dumps({'error': 'No data provided for deep analysis.'})}\n\n"
+            return
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+                summaries: list[str] = []
+                for i, chunk in enumerate(chunks):
+                    yield f"data: {json.dumps({'phase': 'map', 'chunk': i + 1, 'total': total_chunks, 'label': chunk['label'], 'status': 'processing'})}\n\n"
+
+                    user_msg = f"DATA TYPE: {chunk['label']}\n\n{chunk['content']}"
+                    try:
+                        summary = await ollama_chat(client, DEEP_MAP_PROMPT, user_msg, max_tokens=512)
+                        summaries.append(f"### {chunk['label']}\n{summary}")
+                        yield f"data: {json.dumps({'phase': 'map', 'chunk': i + 1, 'total': total_chunks, 'label': chunk['label'], 'status': 'done', 'summary_preview': summary[:120]})}\n\n"
+                    except Exception as e:
+                        summaries.append(f"### {chunk['label']}\n(Error: {str(e)[:100]})")
+                        yield f"data: {json.dumps({'phase': 'map', 'chunk': i + 1, 'total': total_chunks, 'label': chunk['label'], 'status': 'error', 'error': str(e)[:100]})}\n\n"
+
+                yield f"data: {json.dumps({'phase': 'reduce', 'status': 'starting'})}\n\n"
+
+                reduce_prompt = DEEP_REDUCE_PROMPT.format(
+                    failed_step=payload.failed_step or "(not available)",
+                    test_steps=payload.test_steps or "(not available)",
+                    chunk_summaries="\n\n".join(summaries),
+                )
+
+                async with client.stream(
+                    "POST",
+                    f"{OLLAMA_BASE}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": AI_SYSTEM_PROMPT},
+                            {"role": "user", "content": reduce_prompt},
+                        ],
+                        "stream": True,
+                        "options": {
+                            "temperature": 0.3,
+                            "num_predict": 4096 if "7b" in model else 2048,
+                            "num_ctx": ctx_size,
+                        },
+                    },
+                ) as resp:
+                    if resp.status_code != 200:
+                        body = await resp.aread()
+                        yield f"data: {json.dumps({'error': f'Ollama HTTP {resp.status_code}: {body.decode()[:300]}'})}\n\n"
+                        return
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            chunk_data = json.loads(line)
+                            token = chunk_data.get("message", {}).get("content", "")
+                            done = chunk_data.get("done", False)
+                            yield f"data: {json.dumps({'phase': 'reduce', 'token': token, 'done': done})}\n\n"
+                            if done:
+                                return
+                        except json.JSONDecodeError:
+                            pass
+
+        except httpx.ConnectError:
+            yield f"data: {json.dumps({'error': 'Cannot connect to Ollama at ' + OLLAMA_BASE})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        deep_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
