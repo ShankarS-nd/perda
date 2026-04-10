@@ -30,11 +30,63 @@ import json
 from pathlib import Path
 from typing import Any
 import logging
+import os
+import requests as _requests_lib
 
 logger = logging.getLogger("uvicorn.error")
 
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file (JENKINS_USER, JENKINS_TOKEN, etc.)
+
+
+# ---------------------------------------------------------------------------
+# Jenkins token auto-refresh helper
+# ---------------------------------------------------------------------------
+_JENKINS_URL = "https://build-device.netradyne.info"
+_JENKINS_SECURITY_PATH = "/user/s.shankar@netradyne.com/security/"
+
+
+def _refresh_jenkins_token() -> dict:
+    """
+    Hit the Jenkins security page with Basic Auth to keep the API token alive.
+    Returns {"ok": True/False, "http_code": int, "message": str}.
+    """
+    user = os.getenv("JENKINS_USER", "")
+    token = os.getenv("JENKINS_TOKEN", "")
+    if not user or not token:
+        return {"ok": False, "http_code": 0, "message": "JENKINS_USER or JENKINS_TOKEN not set in .env"}
+    try:
+        resp = _requests_lib.get(
+            f"{_JENKINS_URL}{_JENKINS_SECURITY_PATH}",
+            auth=(user, token),
+            timeout=30,
+            verify=False,
+        )
+        code = resp.status_code
+        if code == 200:
+            logger.info("Jenkins token refreshed successfully (HTTP 200)")
+            return {"ok": True, "http_code": code, "message": "Token refreshed successfully"}
+        else:
+            logger.warning(f"Jenkins token refresh returned HTTP {code}")
+            return {"ok": False, "http_code": code, "message": f"Security page returned HTTP {code}"}
+    except Exception as exc:
+        logger.error(f"Jenkins token refresh failed: {exc}")
+        return {"ok": False, "http_code": 0, "message": str(exc)}
+
+
+def _is_jenkins_auth_error(text: str) -> bool:
+    """Check if an error message indicates a Jenkins authentication failure."""
+    lower = text.lower()
+    return any(kw in lower for kw in [
+        "authentication failed",
+        "jenkins authentication",
+        "commencelogin",
+        "securityrealm",
+        "token may have expired",
+        "jenkins_token has likely expired",
+        "redirect to login",
+    ])
+
 
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -209,10 +261,33 @@ async def seed_preset_cache():
                     "msg": f"Cached ({len(js):,} bytes)",
                 })
             except (SystemExit, Exception) as exc:
-                payload = json.dumps({
-                    "build": build_num, "label": label,
-                    "status": "error", "msg": str(exc),
-                })
+                if _is_jenkins_auth_error(str(exc)):
+                    logger.info(f"Jenkins auth failure for preset build {build_num} — refreshing token…")
+                    refresh = _refresh_jenkins_token()
+                    if refresh["ok"]:
+                        session = _jenkins_session()
+                        try:
+                            js = fetch_report_js(build_num, session, use_cache=True)
+                            payload = json.dumps({
+                                "build": build_num, "label": label,
+                                "status": "ok",
+                                "msg": f"Cached after token refresh ({len(js):,} bytes)",
+                            })
+                        except (SystemExit, Exception) as exc2:
+                            payload = json.dumps({
+                                "build": build_num, "label": label,
+                                "status": "error", "msg": str(exc2),
+                            })
+                    else:
+                        payload = json.dumps({
+                            "build": build_num, "label": label,
+                            "status": "error", "msg": str(exc),
+                        })
+                else:
+                    payload = json.dumps({
+                        "build": build_num, "label": label,
+                        "status": "error", "msg": str(exc),
+                    })
             yield f"data: {payload}\n\n"
 
         yield f"data: {json.dumps({'status': 'done'})}\n\n"
@@ -226,6 +301,17 @@ async def seed_preset_cache():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Jenkins token refresh endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/jenkins-token-refresh")
+async def jenkins_token_refresh():
+    """Manually trigger a Jenkins token refresh by hitting the security page."""
+    result = _refresh_jenkins_token()
+    return result
 
 
 @app.post("/run-script")
@@ -427,10 +513,21 @@ async def test_report_summary(payload: TestReportRequest):
         rc1_js = fetch_report_js(payload.rc1.strip(), session, use_cache=True)
         # rc2 (current build) — served from cache unless force_refresh=True
         rc2_js = fetch_report_js(payload.rc2.strip(), session, use_cache=use_cache_rc2)
-    except SystemExit as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except (SystemExit, Exception) as exc:
+        if _is_jenkins_auth_error(str(exc)):
+            logger.info("Jenkins auth failure in test-report-summary — refreshing token and retrying…")
+            refresh = _refresh_jenkins_token()
+            if refresh["ok"]:
+                session = _jenkins_session()
+                try:
+                    rc1_js = fetch_report_js(payload.rc1.strip(), session, use_cache=True)
+                    rc2_js = fetch_report_js(payload.rc2.strip(), session, use_cache=use_cache_rc2)
+                except (SystemExit, Exception) as exc2:
+                    raise HTTPException(status_code=500, detail=str(exc2))
+            else:
+                raise HTTPException(status_code=500, detail=str(exc))
+        else:
+            raise HTTPException(status_code=500, detail=str(exc))
 
     svc1, tc1_raw = parse_report_data(rc1_js)
     svc2, tc2_raw = parse_report_data(rc2_js)
@@ -817,13 +914,25 @@ async def test_case_confidence(payload: ConfidenceRequest):
 
     session = _jenkins_session()
 
-    # Fetch & parse every build
+    # Fetch & parse every build (auto-retry once on Jenkins auth failure)
     build_results: list[pd.DataFrame] = []
     for build_num in builds:
         try:
             js = fetch_report_js(build_num, session, use_cache=True)
         except (SystemExit, Exception) as exc:
-            raise HTTPException(status_code=500, detail=f"Build {build_num}: {exc}")
+            if _is_jenkins_auth_error(str(exc)):
+                logger.info(f"Jenkins auth failure for build {build_num} — refreshing token and retrying…")
+                refresh = _refresh_jenkins_token()
+                if refresh["ok"]:
+                    session = _jenkins_session()
+                    try:
+                        js = fetch_report_js(build_num, session, use_cache=True)
+                    except (SystemExit, Exception) as exc2:
+                        raise HTTPException(status_code=500, detail=f"Build {build_num}: {exc2}")
+                else:
+                    raise HTTPException(status_code=500, detail=f"Build {build_num}: {exc}")
+            else:
+                raise HTTPException(status_code=500, detail=f"Build {build_num}: {exc}")
         _svc, tc_raw = parse_report_data(js)
         tc = aggregate_results(tc_raw)
         tc["TC_ID"] = tc["Testcase Name"].apply(extract_tc_id)
@@ -934,11 +1043,23 @@ async def tc_analysis(payload: TCAnalysisRequest):
     target_tc = payload.tc_id.strip().upper()
     session = _jenkins_session()
 
-    # 1. Fetch scr.js
+    # 1. Fetch scr.js (auto-retry once on Jenkins auth failure)
     try:
         js = fetch_report_js(build, session, use_cache=True)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch report: {exc}")
+    except (SystemExit, Exception) as exc:
+        if _is_jenkins_auth_error(str(exc)):
+            logger.info("Jenkins auth failure on scr.js fetch — refreshing token and retrying…")
+            refresh = _refresh_jenkins_token()
+            if refresh["ok"]:
+                session = _jenkins_session()
+                try:
+                    js = fetch_report_js(build, session, use_cache=True)
+                except Exception as exc2:
+                    raise HTTPException(status_code=500, detail=f"Failed to fetch report after token refresh: {exc2}")
+            else:
+                raise HTTPException(status_code=500, detail=f"Jenkins authentication failed and token refresh did not help: {exc}")
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to fetch report: {exc}")
 
     # 2. Parse output to find the TC entry
     output_data: list[dict] = _extract_js_variable(js, "output")
@@ -998,41 +1119,61 @@ async def tc_analysis(payload: TCAnalysisRequest):
     except (ValueError, TypeError):
         end_dt = None
 
-    try:
-        resp = session.get(log_url, timeout=120, allow_redirects=False)
-        if resp.is_redirect:
-            location = resp.headers.get("Location", "")
-            if "commenceLogin" in location or "securityRealm" in location:
-                log_error = "Jenkins authentication failed — the API token may have expired. Please update JENKINS_TOKEN in .env."
+    def _fetch_log(sess):
+        """Attempt to fetch automation log, return (log_lines, log_error, total)."""
+        _log_lines = []
+        _log_error = ""
+        _total = 0
+        try:
+            resp = sess.get(log_url, timeout=120, allow_redirects=False)
+            if resp.is_redirect:
+                location = resp.headers.get("Location", "")
+                if "commenceLogin" in location or "securityRealm" in location:
+                    _log_error = "JENKINS_AUTH_FAILED"
+                else:
+                    _log_error = f"Log request was redirected (HTTP {resp.status_code})"
+            elif resp.status_code != 200:
+                _log_error = f"Log file not found (HTTP {resp.status_code})"
             else:
-                log_error = f"Log request was redirected (HTTP {resp.status_code})"
-        elif resp.status_code != 200:
-            log_error = f"Log file not found (HTTP {resp.status_code})"
-        else:
-            all_lines = resp.text.split('\n')
-            total_log_lines = len(all_lines)
+                all_lines = resp.text.split('\n')
+                _total = len(all_lines)
 
-            time_pat = _re.compile(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})')
-            if start_dt and end_dt:
-                in_range = False
-                for line in all_lines:
-                    m = time_pat.search(line)
-                    if m:
-                        try:
-                            line_dt = datetime.strptime(m.group(1), fmt)
-                            if line_dt >= start_dt:
-                                in_range = True
-                            if line_dt > end_dt:
-                                break
-                        except ValueError:
-                            pass
-                    if in_range:
-                        log_lines.append(line)
-            else:
-                log_lines = all_lines[:500]
-                log_error = "Could not parse start/end timestamps; showing first 500 lines."
-    except Exception as exc:
-        log_error = f"Failed to fetch log: {exc}"
+                time_pat = _re.compile(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})')
+                if start_dt and end_dt:
+                    in_range = False
+                    for line in all_lines:
+                        m = time_pat.search(line)
+                        if m:
+                            try:
+                                line_dt = datetime.strptime(m.group(1), fmt)
+                                if line_dt >= start_dt:
+                                    in_range = True
+                                if line_dt > end_dt:
+                                    break
+                            except ValueError:
+                                pass
+                        if in_range:
+                            _log_lines.append(line)
+                else:
+                    _log_lines = all_lines[:500]
+                    _log_error = "Could not parse start/end timestamps; showing first 500 lines."
+        except Exception as exc:
+            _log_error = f"Failed to fetch log: {exc}"
+        return _log_lines, _log_error, _total
+
+    log_lines, log_error, total_log_lines = _fetch_log(session)
+
+    # Auto-refresh Jenkins token and retry once if auth failed
+    if log_error == "JENKINS_AUTH_FAILED":
+        logger.info("Jenkins auth failure on log fetch — refreshing token and retrying…")
+        refresh = _refresh_jenkins_token()
+        if refresh["ok"]:
+            session = _jenkins_session()
+            log_lines, log_error, total_log_lines = _fetch_log(session)
+
+    # If still auth failed after refresh, show the user-facing message
+    if log_error == "JENKINS_AUTH_FAILED":
+        log_error = "Jenkins authentication failed — the API token may have expired. Please update JENKINS_TOKEN in .env."
 
     return {
         "build": build,
