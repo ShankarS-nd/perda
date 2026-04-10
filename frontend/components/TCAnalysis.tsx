@@ -65,7 +65,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 export default function TCAnalysis() {
   const [build, setBuild] = useState("");
   const [tcId, setTcId] = useState("");
-  const [branch, setBranch] = useState("");
+  const [branch, setBranch] = useState("QA_6.12_20251108_BI");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<AnalysisResult | null>(null);
@@ -1671,13 +1671,6 @@ export default function TCAnalysis() {
                           Reset filters
                         </button>
                       )}
-                      <button
-                        onClick={() => openTabInNewWindow("device-log")}
-                        className="text-[10px] px-2 py-1 rounded-md bg-white/[0.04] text-gray-400 border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
-                        title="Open filtered logs in new tab"
-                      >
-                        ↗ Open
-                      </button>
                       <button
                         onClick={() => { setDlLogs([]); setDlLogCount(0); setDlError(null); setDlLevelFilter(new Set()); setDlSelectedServices(new Set()); setDlSearch(""); }}
                         className="text-[10px] px-2 py-1 rounded-md bg-white/[0.04] text-gray-500 border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
