@@ -100,6 +100,7 @@ export default function TCAnalysis() {
   const [dlAutoStatus, setDlAutoStatus] = useState<"idle" | "checking" | "downloading" | "loading" | "done" | "error">("idle");
   const [dlMatchedService, setDlMatchedService] = useState("");
   const [dlServiceExpanded, setDlServiceExpanded] = useState(false);
+  const [dlVisibleCount, setDlVisibleCount] = useState(500);
 
   // ── AI Analysis state ──
   const [aiLoading, setAiLoading] = useState(false);
@@ -497,27 +498,33 @@ export default function TCAnalysis() {
     setDlAutoStatus("done");
   };
 
-  // Filter log lines by search term
-  const filteredLogs = data
-    ? searchTerm
-      ? data.logs.filter((l) => l.toLowerCase().includes(searchTerm.toLowerCase()))
-      : data.logs
-    : [];
+  // Filter log lines by search term (memoized)
+  const searchTermLower = searchTerm.toLowerCase();
+  const filteredLogs = useMemo(() => {
+    if (!data) return [];
+    if (!searchTerm) return data.logs;
+    return data.logs.filter((l) => l.toLowerCase().includes(searchTermLower));
+  }, [data, searchTerm, searchTermLower]);
 
-  // Filter source lines by search term
-  const sourceLines = sourceData ? sourceData.source_code.split("\n") : [];
-  const filteredSourceLines = sourceSearch
-    ? sourceLines.filter((l) => l.toLowerCase().includes(sourceSearch.toLowerCase()))
-    : sourceLines;
+  // Filter source lines by search term (memoized)
+  const sourceLines = useMemo(() => sourceData ? sourceData.source_code.split("\n") : [], [sourceData]);
+  const sourceSearchLower = sourceSearch.toLowerCase();
+  const filteredSourceLines = useMemo(() => {
+    if (!sourceSearch) return sourceLines;
+    return sourceLines.filter((l) => l.toLowerCase().includes(sourceSearchLower));
+  }, [sourceLines, sourceSearch, sourceSearchLower]);
 
   // Device log filtering — memoised to avoid recomputing on every render
   const dlSearchLower = dlSearch.trim().toLowerCase();
-  const dlFilteredLogs = useMemo(() => dlLogs.filter((l) => {
-    if (dlSelectedServices.size > 0 && !dlSelectedServices.has(l.service)) return false;
-    if (dlLevelFilter.size > 0 && !dlLevelFilter.has(l.level)) return false;
-    if (dlSearchLower && !l.line.toLowerCase().includes(dlSearchLower)) return false;
-    return true;
-  }), [dlLogs, dlSelectedServices, dlLevelFilter, dlSearchLower]);
+  const dlFilteredLogs = useMemo(() => {
+    setDlVisibleCount(500); // reset pagination when filters change
+    return dlLogs.filter((l) => {
+      if (dlSelectedServices.size > 0 && !dlSelectedServices.has(l.service)) return false;
+      if (dlLevelFilter.size > 0 && !dlLevelFilter.has(l.level)) return false;
+      if (dlSearchLower && !l.line.toLowerCase().includes(dlSearchLower)) return false;
+      return true;
+    });
+  }, [dlLogs, dlSelectedServices, dlLevelFilter, dlSearchLower]);
   const dlLevelCounts = useMemo(() => dlLogs.reduce<Record<string, number>>((acc, l) => {
     acc[l.level] = (acc[l.level] ?? 0) + 1;
     return acc;
@@ -1840,7 +1847,7 @@ export default function TCAnalysis() {
                         </tr>
                       </thead>
                       <tbody>
-                        {dlFilteredLogs.map((entry, i) => {
+                        {dlFilteredLogs.slice(0, dlVisibleCount).map((entry, i) => {
                           const ts = entry.epoch_ms
                             ? new Date(entry.epoch_ms).toISOString().replace("T", " ").slice(0, 19)
                             : "—";
@@ -1868,6 +1875,20 @@ export default function TCAnalysis() {
                           );
                         })}
                       </tbody>
+                      {dlFilteredLogs.length > dlVisibleCount && (
+                        <tfoot>
+                          <tr>
+                            <td colSpan={4} className="text-center py-3">
+                              <button
+                                onClick={() => setDlVisibleCount(prev => prev + 500)}
+                                className="text-[11px] px-4 py-1.5 rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/20 hover:bg-sky-500/20 transition-colors"
+                              >
+                                Show 500 more ({(dlFilteredLogs.length - dlVisibleCount).toLocaleString()} remaining)
+                              </button>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
                     </table>
                   </div>
                 ) : dlAutoStatus === "done" ? (
