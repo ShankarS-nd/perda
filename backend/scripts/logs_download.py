@@ -80,16 +80,6 @@ download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-staging/logs_3/' + de
 os.system(download_cmd)
 download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-staging/logs_4/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_0/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
-os.system(download_cmd)
-download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_1/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
-os.system(download_cmd)
-download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_2/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
-os.system(download_cmd)
-download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_3/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
-os.system(download_cmd)
-download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_4/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
-os.system(download_cmd)
 
 base_path = device_id + '/' + log_date + '/'
 if not os.path.exists(base_path):
