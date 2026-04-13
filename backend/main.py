@@ -1605,7 +1605,40 @@ AI_SYSTEM_PROMPT = (
     "  - bhcopy: file copy service (bagheera)\n"
     "  - inference: ML inference engine (produces summary.json with alerts)\n"
     "  - nd_bt: Bluetooth service\n"
-    "  - wifi_mgr: WiFi management\n\n"
+    "  - wifi_mgr: WiFi management\n"
+    "  - power_mon: Power monitor service — monitors ignition/crank voltage levels, "
+    "manages device power states (awake/sleep/shutdown), detects ignition on/off events\n"
+    "  - apm (Advanced Power Management): manages power state transitions, "
+    "check_uptime monitors uptime after ignition events\n"
+    "  - nd_upload: handles file upload to cloud\n"
+    "  - nd_download: handles OTA/config download from cloud\n\n"
+
+    "HARDWARE TEST INFRASTRUCTURE:\n"
+    "  - Relay board: controls physical power/ignition to the dashcam device\n"
+    "    - relay 'on' = ignition ON (vehicle engine running, device fully powered)\n"
+    "    - relay 'off' = ignition OFF (simulates engine shutdown / key-off event)\n"
+    "    - RunRelayAutomation_obj.run_python_script(led_num, status) controls relays\n"
+    "  - When ignition goes OFF, the device should detect low crank voltage and:\n"
+    "    1. Log 'low crank level' in power_mon\n"
+    "    2. Deactivate check_uptime monitoring\n"
+    "    3. Enter a graceful shutdown sequence (upload pending files, save state)\n"
+    "    4. Eventually power off or enter sleep mode\n"
+    "  - When ignition goes ON, the device boots up, services start, and begins recording\n"
+    "  - The test automation server connects to devices via SSH over WiFi\n"
+    "  - Devices are Netradyne dashcams (Driveri) installed in vehicles\n\n"
+
+    "DOMAIN CONTEXT — WHAT TESTS ARE VERIFYING:\n"
+    "  - Power/ignition tests (TC with relay steps): verify device correctly detects "
+    "ignition on/off via crank voltage and transitions power states properly\n"
+    "  - File generation tests: verify dashcam creates video files (.mp4), metadata, "
+    "STATE files, and chm files in ND_INPUT/ within expected timeframes\n"
+    "  - OTA tests: verify device downloads and applies firmware updates correctly\n"
+    "  - Cloud API tests (keepalive, obs upload, log upload): verify device communicates "
+    "with IDMS cloud backend properly\n"
+    "  - Inference/alert tests: verify ML model produces correct driving event alerts\n"
+    "  - SD card tests: verify files are stored correctly on SD card\n"
+    "  - Log search tests (LogAnalyzer_obj.search_logs): search device service logs "
+    "for expected messages that prove a feature worked correctly\n\n"
 
     "LOG FORMAT:\n"
     "  - Device logs: epoch_ms: counter: SERVICE: LEVEL: message\n"
@@ -1619,17 +1652,40 @@ AI_SYSTEM_PROMPT = (
     "  - OTA failures: download interrupted, wrong version, otacheck_count.txt issues\n"
     "  - Assertion on file counts: ND_INPUT file generation timing varies\n"
     "  - Validate_data exit: condition evaluated to false → fail_method action='exit'\n"
-    "  - use_result() returning empty: previous step didn't save result or failed\n\n"
+    "  - use_result() returning empty: previous step didn't save result or failed\n"
+    "  - Log message not found (search_logs fails): this means the DEVICE BEHAVIOR didn't happen, "
+    "NOT that the test is wrong. Ask WHY the device didn't produce that log message. Possible reasons:\n"
+    "    * Hardware issue: relay didn't actually cut power, ignition signal not reaching device\n"
+    "    * Timing issue: log search happened before the device had time to process the event\n"
+    "    * Service crash: the service (e.g. power_mon) crashed or wasn't running\n"
+    "    * Configuration issue: device config doesn't match expected behavior\n"
+    "    * Network/SSH issue: device disconnected before logging could happen\n"
+    "    * Firmware bug: the feature being tested has a regression in this build\n"
+    "    * Wrong log file: the message might be in a different service log\n\n"
 
     "ANALYSIS RULES:\n"
     "(1) Be specific — cite exact log lines, timestamps, error messages.\n"
     "(2) Map test step failures back to the dict_list STEP structure.\n"
     "(3) When you see 'STEP_N_status == Fail', trace which API method was called and why it returned Fail.\n"
     "(4) Check if use_result() references have valid data from prior steps.\n"
-    "(5) Do NOT give generic advice. (6) If data is missing, say so explicitly."
+    "(5) Do NOT give generic advice like 'check the logs' or 'verify the method'.\n"
+    "(6) If data is missing, say so explicitly.\n"
+    "(7) CRITICAL: When a log search fails (search_logs returns Fail), do NOT just say "
+    "'the message was not found'. Instead, reason about WHY the device did not produce that "
+    "message. Understand what the test is verifying (e.g. ignition off → low crank detection) "
+    "and analyze what could prevent that behavior at the device/hardware/firmware level.\n"
+    "(8) Use the device logs (if provided) to look for clues — error messages, service crashes, "
+    "unexpected states, timing gaps that explain why an expected behavior didn't occur.\n"
+    "(9) When relay steps are involved, understand they simulate real vehicle ignition events. "
+    "The test is checking if the DEVICE correctly responds to these physical events."
 )
 
 AI_USER_TEMPLATE = """A test case FAILED. Analyze the data below and determine the root cause.
+
+IMPORTANT: Do NOT just state what failed (e.g. "log message not found"). Instead, reason about WHY the device
+didn't produce the expected behavior. Think about what each test step is trying to do — for example, if a relay
+is turned off, the test is simulating ignition OFF and expecting the device to detect low crank voltage.
+If a search_logs step fails, it means the device didn't behave as expected — explain WHY.
 
 FAILED STEP:
 {failed_step}
@@ -1640,7 +1696,7 @@ TEST STEPS (execution sequence):
 AUTOMATION LOGS (stderr/stdout from test runner):
 {automation_logs}
 
-DEVICE LOGS (from the set-top-box around the time of failure):
+DEVICE LOGS (from the dashcam device around the time of failure):
 {device_logs}
 
 TEST SOURCE CODE:
@@ -1650,18 +1706,19 @@ TEST SOURCE CODE:
 Respond with this structure:
 
 ## Root Cause
-Identify the exact failure reason. Quote specific log lines or error messages as evidence.
+Identify the exact failure reason at the device/firmware level. Quote specific log lines or error messages.
+If a log search failed, explain what device behavior was expected and why it didn't happen.
 
 ## What Happened (Timeline)
-Step-by-step breakdown of events leading to failure.
+Step-by-step breakdown of events leading to failure. Explain what each step was trying to verify.
 
 ## Possible Causes (Ranked)
-1. **[High]** ...
+1. **[High]** ... (most likely hardware/firmware/timing cause)
 2. **[Medium]** ...
 3. **[Low]** ...
 
 ## Suggested Fixes
-Actionable recommendations. Include code changes if applicable.
+Actionable recommendations for the QA team (e.g. check relay, increase wait time, verify device config).
 
 ## Confidence: High / Medium / Low
 Explain why.
@@ -1777,16 +1834,26 @@ DEEP_MAP_PROMPT = """You are analyzing a CHUNK of data from a failed Netradyne d
 Summarize ONLY what is relevant to the failure. Focus on:
 - Errors, exceptions, unexpected values
 - State changes (values going from expected to unexpected)
-- Timing anomalies
+- Timing anomalies (long gaps between events, timeouts)
 - STEP_N_status values and which API methods were called
 - SSH connection issues, file generation failures
 - use_result() references that may have empty/wrong data
+- Relay state changes and whether the device responded correctly to ignition events
+- Log search results — if a search_logs step failed, note what message was expected and in which service log
 - Any line that looks abnormal even if not flagged as error
+- Signs of service crashes, restarts, or missing services in device logs
+
+IMPORTANT: When you see a log search failure, don't just say "message not found". Note:
+- What message was being searched for and in which log file
+- What the message would indicate about device behavior (e.g. "low crank level" means device detected ignition off)
+- Any log entries that show the device was in a DIFFERENT state than expected
 
 Be concise. Output a bullet-point summary of findings. If nothing relevant, say "No relevant findings in this chunk."
 """
 
-DEEP_REDUCE_PROMPT = """You are a senior QA engineer at Netradyne with deep knowledge of the nd_test_bot Test Automation Framework.
+DEEP_REDUCE_PROMPT = """You are a senior QA engineer at Netradyne with deep knowledge of the nd_test_bot Test Automation Framework
+and the Netradyne Driveri dashcam hardware/firmware.
+
 Multiple chunks of data from a failed test case have been analyzed independently.
 Below are the summaries from each chunk, plus the test steps and failed step info.
 
@@ -1796,8 +1863,15 @@ YOU KNOW:
 - validate_data conditions determine pass/fail branching (continue/exit/jump)
 - Device types: Krait (K1/K2) and Bagheera (B2/B3) with different file paths
 - Common APIs: Calculator, FilesController, DeviceController, CloudApi, LogAnalyzer, FileUtils
+- Relay board controls physical ignition: relay off = ignition OFF, relay on = ignition ON
+- When ignition turns OFF, device should detect low crank voltage → power_mon logs "low crank level" → check_uptime deactivated → graceful shutdown
+- When ignition turns ON, device boots, services start, recording begins
+- search_logs failures mean THE DEVICE didn't produce the expected behavior, not that the test is wrong
 
 YOUR TASK: Synthesize all chunk summaries into a final root cause analysis.
+THINK DEEPLY about WHY a failure happened at the device/hardware/firmware level, not just WHAT failed.
+For example: if a log message wasn't found after relay off, reason about whether the relay actually cut power,
+whether the device had time to detect the voltage change, whether the service was running, etc.
 
 FAILED STEP:
 {failed_step}
@@ -1812,18 +1886,21 @@ TEST STEPS:
 Respond with this structure:
 
 ## Root Cause
-Identify the exact failure reason. Reference specific findings from the chunk summaries.
+Identify the exact failure reason at the device/firmware level. Don't just say "message not found" —
+explain WHY the device didn't produce the expected behavior. Reference specific findings from the chunk summaries.
 
 ## What Happened (Timeline)
-Step-by-step breakdown of events leading to failure.
+Step-by-step breakdown of events leading to failure. Include what the test was trying to verify
+(e.g. "This test verifies that when ignition is turned off, the device correctly detects low crank voltage
+and transitions to shutdown state").
 
 ## Possible Causes (Ranked)
-1. **[High]** ...
+1. **[High]** ... (most likely device/hardware/timing cause)
 2. **[Medium]** ...
 3. **[Low]** ...
 
 ## Suggested Fixes
-Actionable recommendations.
+Actionable recommendations for the QA team (e.g. check relay hardware, increase wait time, verify device config).
 
 ## Confidence: High / Medium / Low
 Explain why.
