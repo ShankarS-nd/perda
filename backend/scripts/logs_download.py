@@ -15,6 +15,10 @@ from datetime import datetime
 # even when launched from a systemd service with a stripped environment.
 os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:" + os.environ.get("PATH", "")
 
+# On DTA server (EC2 with instance role), no AWS profile is needed.
+# Set DTA_SERVER=1 in the environment to skip --profile s3view.
+_PROFILE_FLAG = "" if os.environ.get("DTA_SERVER") else "--profile s3view "
+
 
 def isInt(value):
     try:
@@ -66,25 +70,25 @@ print('Downloading logs of device ' + device_id + ' for ' + log_date)
 if not os.path.exists(device_id):
     os.makedirs(device_id)
 
-download_cmd = 'aws s3 sync --profile s3view  s3://idms-staging/logs_0/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-staging/logs_0/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-staging/logs_1/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-staging/logs_1/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-staging/logs_2/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-staging/logs_2/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-staging/logs_3/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-staging/logs_3/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-staging/logs_4/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-staging/logs_4/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-production/logs_0/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_0/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-production/logs_1/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_1/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-production/logs_2/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_2/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-production/logs_3/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_3/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
-download_cmd = 'aws s3 sync --profile s3view s3://idms-production/logs_4/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
+download_cmd = 'aws s3 sync ' + _PROFILE_FLAG + 's3://idms-production/logs_4/' + device_id + '/' + log_date + ' ' + device_id + '/' + log_date + '/'
 os.system(download_cmd)
 
 base_path = device_id + '/' + log_date + '/'

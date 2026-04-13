@@ -7,6 +7,7 @@ Type=simple
 User=__SERVER_USER__
 WorkingDirectory=__PERDA_DIR__/backend
 Environment="PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin:/snap/bin"
+Environment="DTA_SERVER=1"
 
 # Load Jenkins / GitHub tokens from .env
 EnvironmentFile=__PERDA_DIR__/backend/.env
