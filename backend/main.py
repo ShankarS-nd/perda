@@ -1533,39 +1533,58 @@ AI_SYSTEM_PROMPT = (
     "Results saved as STEP_N_status='Pass'/'Fail' in global_results. "
     "use_result(var) references saved results from prior steps.\n\n"
 
-    "KEY API OBJECTS: Calculator_obj (run_command_on_device, compare_equal, grep_string), "
-    "LogAnalyzer_obj (search_logs), RunRelayAutomation_obj (relay = ignition simulation), "
-    "DeviceController_obj (reboot_device), UpdateConfig_obj (reupload_config), "
-    "CloudApi_obj (ops_data_api), FilesController_obj (check_file_generation), "
-    "SSHConnector_obj (reconnect_to_server), FileUtils_obj (file_availability).\n\n"
+    "TEST CASE STRUCTURAL RULES (CHECK THESE FIRST — structural bugs are common root causes):\n"
+    "- Ordering: PreCondition_* steps → STEP_* steps → PostCondition_* steps. This order MUST be maintained.\n"
+    "- Numbering: Each section must be numbered serially starting from 1. No gaps, no repeats.\n"
+    "  DUPLICATE step names are a BUG: e.g. two 'PreCondition_6' in the dict_list means the framework "
+    "overwrites PreCondition_6_status with the second one's result, and saved results from the first "
+    "may be lost or inaccessible. The Step graph may also skip or mishandle duplicates.\n"
+    "- Sub-steps like STEP_2_1 must come right after their parent (STEP_2).\n"
+    "- If validate_data has action='exit' on fail, later steps never run — the test stops there.\n"
+    "- CHECK: Are any step numbers skipped? Are any duplicated? Is the PreCondition→STEP→PostCondition "
+    "order violated? These are authoring bugs, not device issues.\n\n"
+
+    "KEY API OBJECTS: Calculator_obj (run_command_on_device, compare_equal, grep_string, "
+    "get_current_timestamp), LogAnalyzer_obj (search_logs — searches device log files by name, "
+    "e.g. 'power_mon' searches /home/ubuntu/.nddevice/log/power_monitor/), "
+    "SerialCom_obj (call_relay — 'on'/'off' controls ignition relay), "
+    "DeviceController_obj (reboot_device, delay), UpdateConfig_obj (download_config, change_param_value, "
+    "upload_config, reupload_config), CloudApi_obj (ops_data_api), "
+    "FilesController_obj (check_file_generation), SSHConnector_obj (reconnect_to_server), "
+    "FileUtils_obj (file_availability).\n\n"
 
     "DEVICE FIRMWARE (C++ services, logs at /home/ubuntu/.nddevice/log/<service>/):\n"
     "- power_monitor [PWR]: Reads crank GPIO ('1'=CRANK_HIGH, '0'=CRANK_LOW). "
-    "CRANK_LOW→process_crank_low()→shutdown. CRANK_HIGH→process_crank_high()→cancel shutdown. "
+    "CRANK_LOW→process_crank_low()→initiate_shutdown(crank_shutdown_duration). "
+    "CRANK_HIGH→process_crank_high()→cancel shutdown. "
     "check_uptime() logs 'low crank level; check_uptime is deactivated' when crank!=HIGH. "
-    "4 threads: gpio interrupt, direct polling (~30s cycle), shutdown polling, keepalive.\n"
+    "keepalive_powerstate_thread sends ka_minified JSON to IDMS cloud on crank change — "
+    "ka_minified contains BATTERY_ACTIVE, supercap_count, battery_voltage fields.\n"
     "- apm [APM]: IGNS_worker detects ignition via MSP/AON, writes to sysfs GPIO for power_monitor. "
-    "If motion_detection enabled, waits 180s before IGNITION_OFF.\n"
+    "If motion_detection enabled, waits vehicle_idle_time (default 180s) before IGNITION_OFF.\n"
     "- svc [SVC]: Watchdog. Services send keepalive ~30s. Missed→reboot.\n"
-    "- nd_central [NDC]: Recording. Receives IGNITION ON/OFF from power_monitor.\n"
     "- Ignition flow: relay→MSP/AON→APM sysfs→power_monitor GPIO→process_crank_low/high\n\n"
 
     "LOG FORMAT: 'epoch_ms: counter: SERVICE: LEVEL: message' (I/E/W/D/C)\n\n"
 
-    "RULES:\n"
-    "1. EVERY claim MUST quote an actual log line: '> automation_log: <line>' or '> device_log: <line>'\n"
-    "2. Use EXACT step names from the test data (PreCondition_1, STEP_1, etc.). NEVER invent names like S1, S2.\n"
-    "3. Focus on the FAILING step and 3-4 steps before it. Do NOT enumerate every step.\n"
-    "4. If search_logs failed, search the provided device logs yourself for that string.\n"
-    "5. If no evidence exists, say 'No evidence in provided logs for X'.\n"
-    "6. Never describe firmware abstractly without log evidence.\n"
-    "7. If logs are insufficient, say what's missing.\n"
+    "ANALYSIS RULES:\n"
+    "1. FIRST: Check test code structure for duplicate step names, numbering gaps, wrong ordering.\n"
+    "2. EVERY claim MUST quote an actual log line: '> automation_log: <line>' or '> device_log: <line>'\n"
+    "3. Use EXACT step names from the test data (PreCondition_1, STEP_1, etc.). NEVER invent S1, S2.\n"
+    "4. Focus on the FAILING step and 3-4 steps before it. Do NOT enumerate every step.\n"
+    "5. If search_logs failed, search the provided device logs yourself for that string.\n"
+    "6. If no evidence exists, say 'No evidence in provided logs for X'.\n"
+    "7. Never describe firmware abstractly without log evidence.\n"
+    "8. If logs are insufficient, say what's missing.\n"
 )
 
 AI_USER_TEMPLATE = """A test case FAILED. Find the root cause using log evidence.
 
-CRITICAL: Use the EXACT step names from TEST STEPS (e.g. PreCondition_1, STEP_3, PostCondition_2).
-NEVER invent names like S1, S2, S3.
+CRITICAL INSTRUCTIONS:
+1. Use EXACT step names from TEST STEPS (PreCondition_1, STEP_3, etc.). NEVER invent S1, S2.
+2. FIRST check TEST CODE for structural bugs: duplicate step names, numbering gaps/repeats,
+   wrong ordering (PreCondition→STEP→PostCondition must be maintained).
+   These are the MOST COMMON root causes.
 
 FAILED STEP: {failed_step}
 
@@ -1582,7 +1601,12 @@ TEST CODE:
 {test_code}
 
 ---
-Respond CONCISELY with this structure:
+Respond CONCISELY:
+
+## Test Code Structural Issues
+Check the dict_list for: duplicate step names, numbering gaps, ordering violations.
+If found, explain exactly what's wrong and how the framework would mishandle it.
+If none found, say "No structural issues found."
 
 ## Root Cause
 State the root cause. Quote the log lines that prove it:
