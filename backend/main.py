@@ -1600,45 +1600,158 @@ AI_SYSTEM_PROMPT = (
     "  - Production: https://idms.netradyne.com/restserver/api/v1/\n"
     "  - OTA downloads, keepalive calls, observation uploads all go through IDMS\n\n"
 
-    "KEY SERVICES ON DEVICE:\n"
-    "  - otacheck: OTA update checking (otacheck.pid, otacheck_state.txt, otacheck_count.txt)\n"
-    "  - bhcopy: file copy service (bagheera)\n"
-    "  - inference: ML inference engine (produces summary.json with alerts)\n"
-    "  - nd_bt: Bluetooth service\n"
-    "  - wifi_mgr: WiFi management\n"
-    "  - power_mon: Power monitor service — monitors ignition/crank voltage levels, "
-    "manages device power states (awake/sleep/shutdown), detects ignition on/off events\n"
-    "  - apm (Advanced Power Management): manages power state transitions, "
-    "check_uptime monitors uptime after ignition events\n"
-    "  - nd_upload: handles file upload to cloud\n"
-    "  - nd_download: handles OTA/config download from cloud\n\n"
+    "KEY SERVICES ON DEVICE (from nd_device_services repo — C++ firmware):\n"
+    "  Services communicate via nd_msgq message queues. Each sends keepalive to SVC.\n"
+    "  Log tag in brackets. Logs at /home/ubuntu/.nddevice/log/<service>/\n\n"
 
-    "HARDWARE TEST INFRASTRUCTURE:\n"
-    "  - Relay board: controls physical power/ignition to the dashcam device\n"
-    "    - relay 'on' = ignition ON (vehicle engine running, device fully powered)\n"
-    "    - relay 'off' = ignition OFF (simulates engine shutdown / key-off event)\n"
-    "    - RunRelayAutomation_obj.run_python_script(led_num, status) controls relays\n"
-    "  - When ignition goes OFF, the device should detect low crank voltage and:\n"
-    "    1. Log 'low crank level' in power_mon\n"
-    "    2. Deactivate check_uptime monitoring\n"
-    "    3. Enter a graceful shutdown sequence (upload pending files, save state)\n"
-    "    4. Eventually power off or enter sleep mode\n"
-    "  - When ignition goes ON, the device boots up, services start, and begins recording\n"
-    "  - The test automation server connects to devices via SSH over WiFi\n"
-    "  - Devices are Netradyne dashcams (Driveri) installed in vehicles\n\n"
+    "  - power_monitor [PWR]: THE MOST CRITICAL SERVICE FOR IGNITION TESTS.\n"
+    "    * Reads crank voltage via GPIO pin (gpio_crank_level_info_file): '1'=CRANK_HIGH, '0'=CRANK_LOW\n"
+    "    * Has 4 threads: gpio171_interrupt_thread (GPIO interrupt for crank changes), "
+    "direct_poling_thread (polls crank voltage, uptime, temperature, battery voltage every cycle), "
+    "shutdown_poling_thread (monitors shutdown timer and executes shutdown/suspend), "
+    "keepalive_powerstate_thread (sends keepalive to IDMS cloud on crank change)\n"
+    "    * check_uptime() function: if crank is NOT HIGH, logs 'low crank level; check_uptime is deactivated' and returns false. "
+    "This is THE message many ignition-off tests search for.\n"
+    "    * process_crank_low(): called when CRANK_LOW detected → sends IGNITION_OFF to nd_central & btfv → "
+    "initiates shutdown with crank_shutdown_duration (default 3 min) → SHUTDOWN_FOR_IGNITION_OFF\n"
+    "    * process_crank_high(): called when CRANK_HIGH detected → cancels shutdown → postpones by 6 min → "
+    "sends IGNITION_ON to nd_central & btfv → resets lowpower_wakeups to 0\n"
+    "    * initiate_shutdown(secs, reason): sets RTC wakeup timer, starts shutdown countdown. "
+    "Reasons: SHUTDOWN_FOR_BAD_VOLTAGE, SHUTDOWN_FOR_IGNITION_OFF, SHUTDOWN_FOR_CYCLIC_REBOOT, "
+    "SHUTDOWN_FOR_CAM_CRASH, SHUTDOWN_FOR_SVC_KEEPALIVE_FAILURE, SHUTDOWN_FOR_LOWPOWER_WAKEUP, etc.\n"
+    "    * ignition_cb_func(): callback triggered by GPIO interrupt when crank voltage changes, "
+    "sends POWERMON_CRANK_CHANGE message to power_monitor_msg_loop\n"
+    "    * power_monitor_msg_loop(): main message handler, processes POWERMON_CRANK_CHANGE, "
+    "POWERMON_DIRECTPOLL_CRANK_CHANGE, POWERMON_MAXTIMEOUT, POWERMON_BAD_BATTERY_VOLTAGE, etc.\n"
+    "    * IMPORTANT: 'low crank level; check_uptime is deactivated' is logged in check_uptime() which "
+    "is called when process_crank_high() runs AND crank is actually LOW. This means: if check_uptime sees "
+    "crank != CRANK_HIGH, it logs this message. So if this message is NOT found, it means either: "
+    "(a) check_uptime was never called (no crank HIGH event after crank went LOW), "
+    "(b) power_monitor service crashed/wasn't running, "
+    "(c) crank level never actually changed (relay didn't work), "
+    "(d) GPIO file couldn't be read (hardware issue)\n\n"
 
-    "DOMAIN CONTEXT — WHAT TESTS ARE VERIFYING:\n"
-    "  - Power/ignition tests (TC with relay steps): verify device correctly detects "
-    "ignition on/off via crank voltage and transitions power states properly\n"
-    "  - File generation tests: verify dashcam creates video files (.mp4), metadata, "
-    "STATE files, and chm files in ND_INPUT/ within expected timeframes\n"
-    "  - OTA tests: verify device downloads and applies firmware updates correctly\n"
-    "  - Cloud API tests (keepalive, obs upload, log upload): verify device communicates "
-    "with IDMS cloud backend properly\n"
-    "  - Inference/alert tests: verify ML model produces correct driving event alerts\n"
-    "  - SD card tests: verify files are stored correctly on SD card\n"
-    "  - Log search tests (LogAnalyzer_obj.search_logs): search device service logs "
-    "for expected messages that prove a feature worked correctly\n\n"
+    "  - apm (Advanced Power Management) [APM]: Manages ignition/motion detection\n"
+    "    * Has workers: IGNS_worker (ignition), IMU_worker (accelerometer), GPS_worker, SC_worker (supercap)\n"
+    "    * IGNS_worker.intr_func(): registers ignCallback for ignition interrupt from MSP/AON\n"
+    "    * IGNS_worker.read_status(): reads current ignition via get_ignition_status() with debounce "
+    "(3 reads at 50ms intervals, all must agree)\n"
+    "    * start_monitor(): main loop — checks all workers, writes pseudo-ignition to sysfs. "
+    "If motion detection enabled: waits vehicle_idle_time (default 180s) before writing IGNITION_OFF\n"
+    "    * write_to_sysfs(): writes ignition status to GPIO file that power_monitor reads\n"
+    "    * KEY FLOW: Physical ignition → MSP/AON detects → APM IGNS interrupt → write_to_sysfs(IGNITION_OFF/ON) "
+    "→ power_monitor GPIO interrupt/poll detects change → process_crank_low/high()\n\n"
+
+    "  - svc (Service Supervisor) [SVC]: Watchdog and service health monitor\n"
+    "    * Receives keepalive from ALL services every ~30 seconds\n"
+    "    * If a service misses keepalive for longer than its timeout (default 120s), "
+    "stops kicking hardware watchdog → device reboots\n"
+    "    * do_house_keeping(): checks each service's health, triggers reboot via power_monitor if unhealthy\n"
+    "    * Also manages disk monitoring (diskmon), config file recovery, button events\n"
+    "    * Logs: 'Keep alive timeout: <service_name>' when a service becomes unhealthy\n\n"
+
+    "  - service_mon (Service Monitor) [SM]: Receives error/start/stop messages from ALL services via NDService\n"
+    "    * Each service creates NDService object: nd_service_obj = NDService::get_service_obj(TAG)\n"
+    "    * send_err_msg(error_code, aux_code, message) — logged as health stats\n"
+    "    * Error codes like SM_E_PM_CRANK_LEVEL_FAIL, SM_E_APM_MSP_FAIL, SM_E_SVC_KEEP_ALIVE_TIMEOUT, etc.\n\n"
+
+    "  - bagheera / nd_central [NDC]: Main recording and processing service\n"
+    "    * Manages cameras (outward, inward, side), video recording in 1-minute sessions\n"
+    "    * Receives IGNITION ON/OFF from power_monitor → adjusts processing_mode (0=recording, 1=low power)\n"
+    "    * Generates files in ND_INPUT/: .mp4 (video), STATE files, .chm (checksum), summary.json\n"
+    "    * record_component_errorcb(): on camera crash → sends REQ_POWERMON_CAM_CRASH_TO_REBOOT to power_monitor\n"
+    "    * Uses inference engine for ML alert detection\n\n"
+
+    "  - circular_buffer [CB]: Manages video file lifecycle and SD card storage\n"
+    "    * Monitors SD card health, triggers sdcard_recovery if SD goes read-only\n"
+    "    * Manages file retention: oldest files deleted when space needed\n"
+    "    * sdcard_recovery_thread: if SD card stays read-only too long, requests reboot via power_monitor\n\n"
+
+    "  - uploader [UPL]: Uploads files (video, logs, observations) to IDMS cloud\n"
+    "    * Uploads video files, summary.json, observations to IDMS\n"
+    "    * health_stats_utils: periodically uploads health statistics\n"
+    "    * Logs network info, retry counts, upload success/failure\n\n"
+
+    "  - otacheck: OTA update checker\n"
+    "    * Uses otacheck.pid, otacheck_state.txt, otacheck_count.txt\n"
+    "    * Checks IDMS for available firmware updates\n"
+    "    * installer_app: downloads and applies OTA updates, stops services during install\n\n"
+
+    "  - nd_suspendresume: Handles device suspend/resume cycle\n"
+    "    * Stops services before suspend: cam_rec, bagheera, circular_buffer, uploader, btfv, etc.\n"
+    "    * Restarts services after resume in correct order\n"
+    "    * Manages LED states during boot/suspend\n\n"
+
+    "  - nd_shutdown: Runs during system shutdown\n"
+    "    * Checks crank level: if CRANK_HIGH at shutdown time, does POR (Power On Reset)\n"
+    "    * Manages PMIC watchdog during shutdown\n\n"
+
+    "  - btfv [BTFV]: Bluetooth Face Verification\n"
+    "    * BLE scanning for driver identification\n"
+    "    * Receives ignition status from power_monitor\n\n"
+
+    "  - wifi_mgr: WiFi management service\n"
+    "  - diagnostic: SD card health monitoring, fsck recovery\n"
+    "  - scheduler_manager: Task scheduling\n"
+    "  - time_sync: NTP time synchronization\n"
+    "  - cam_rec: Camera recording management\n"
+    "  - speed: Speed detection via OBD/GPS\n"
+    "  - awsiot: AWS IoT communication, device registration\n"
+    "  - nd_sam: Security Authentication Module\n\n"
+
+    "IGNITION EVENT FLOW (END-TO-END from nd_device_services source code):\n"
+    "  === IGNITION OFF (relay off in test) ===\n"
+    "  1. Physical relay cuts ignition wire voltage\n"
+    "  2. Hardware (MSP/AON chip) detects voltage drop on ignition line\n"
+    "  3. APM's IGNS_worker.intr_func() triggers ignCallback()\n"
+    "  4. ignCallback() reads ignition status with debounce (3 reads at 50ms each)\n"
+    "  5. If confirmed IGNITION_OFF → IGNS_worker.filter_func() resets IGNS bit\n"
+    "  6. APM.start_monitor() detects STATIONARY → writes IGNITION_OFF to sysfs file\n"
+    "    (NOTE: if apm_motion_detection enabled, waits vehicle_idle_time=180s before writing!)\n"
+    "  7. power_monitor detects GPIO change via gpio171_interrupt_thread → ignition_cb_func()\n"
+    "     OR via direct_poling_thread → direct_polling_crank_level()\n"
+    "  8. power_monitor_msg_loop receives POWERMON_CRANK_CHANGE with CRANK_LOW\n"
+    "  9. process_crank_low() executes:\n"
+    "     a. Sets crank_low_registered = true\n"
+    "     b. Calls initiate_shutdown(crank_shutdown_duration=180s, SHUTDOWN_FOR_IGNITION_OFF)\n"
+    "     c. Sends IGNITION_OFF status to nd_central and btfv via message queues\n"
+    "  10. check_uptime() is called (from process_crank_high on next CRANK_HIGH event or from\n"
+    "      direct_poling_thread). Since crank != CRANK_HIGH, it logs:\n"
+    "      'low crank level; check_uptime is deactivated'\n"
+    "  11. shutdown_poling_thread monitors the timer. When time expires:\n"
+    "      → sync filesystem → suspend or shutdown device\n"
+    "  12. nd_central switches to processing_mode=1 (low power)\n"
+    "  13. keepalive_powerstate_thread sends keepalive to IDMS with power_state='0' (ignition off)\n\n"
+
+    "  === IGNITION ON (relay on in test) ===\n"
+    "  1. Physical relay restores ignition wire voltage\n"
+    "  2. MSP/AON detects voltage rise → interrupt\n"
+    "  3. APM detects IGNITION_ON → writes to sysfs\n"
+    "  4. power_monitor detects CRANK_HIGH via GPIO/polling\n"
+    "  5. process_crank_high(): cancels pending shutdown, postpones by 6 min\n"
+    "  6. Sends IGNITION_ON to nd_central → recording resumes in processing_mode=0\n"
+    "  7. nd_central starts new recording session\n"
+    "  8. check_uptime() now returns true if uptime exceeds max_uptime_secs (cyclic reboot)\n\n"
+
+    "  === WHY 'low crank level; check_uptime is deactivated' MIGHT NOT APPEAR ===\n"
+    "  1. APM motion detection delay: if apm_motion_detection is enabled, APM waits 180s "
+    "before writing IGNITION_OFF to sysfs. Test may search logs too early.\n"
+    "  2. GPIO interrupt failure: gpio171_interrupt_thread couldn't open GPIO file "
+    "→ sends POWERMON_INTRPT_THREAD_CRASH. Falls back to direct polling.\n"
+    "  3. Direct polling missed it: direct_poling_thread polls every ~30s. "
+    "If relay was off briefly, the voltage change may have been missed.\n"
+    "  4. power_monitor service not running: check systemd service status.\n"
+    "  5. MSP/AON communication failure: APM logs 'read curr status callback failed' or "
+    "'Unable to read current ign status' → ignition status never updated.\n"
+    "  6. Debounce rejected the change: IGNS_worker reads 3 times at 50ms intervals. "
+    "If readings don't all agree, the change is rejected.\n"
+    "  7. Crank was already LOW: if crank was already LOW when check_uptime was called, "
+    "this message IS logged. If crank NEVER went HIGH first, process_crank_high never ran, "
+    "so check_uptime was never called in the CRANK_HIGH context.\n"
+    "  8. SVC keepalive timeout: if power_monitor missed keepalive to SVC, "
+    "SVC triggers system reboot before the log message could be written.\n"
+    "  9. Supercap intervention: if supercap goes active (battery disconnect), "
+    "power_monitor treats it as CRANK_LOW immediately, bypassing normal flow.\n\n"
 
     "LOG FORMAT:\n"
     "  - Device logs: epoch_ms: counter: SERVICE: LEVEL: message\n"
@@ -1672,20 +1785,35 @@ AI_SYSTEM_PROMPT = (
     "(6) If data is missing, say so explicitly.\n"
     "(7) CRITICAL: When a log search fails (search_logs returns Fail), do NOT just say "
     "'the message was not found'. Instead, reason about WHY the device did not produce that "
-    "message. Understand what the test is verifying (e.g. ignition off → low crank detection) "
-    "and analyze what could prevent that behavior at the device/hardware/firmware level.\n"
-    "(8) Use the device logs (if provided) to look for clues — error messages, service crashes, "
-    "unexpected states, timing gaps that explain why an expected behavior didn't occur.\n"
-    "(9) When relay steps are involved, understand they simulate real vehicle ignition events. "
-    "The test is checking if the DEVICE correctly responds to these physical events."
+    "message using the IGNITION EVENT FLOW above. Trace through the full chain: "
+    "relay → MSP/AON → APM → sysfs → power_monitor → check_uptime. "
+    "Identify which step in this chain likely failed.\n"
+    "(8) CORRELATE automation steps with device logs: for each automation step, explain what "
+    "SHOULD have happened inside the device services and what the device logs actually show. "
+    "Example: 'After S1 (relay off), the device logs should show APM detecting IGNITION_OFF, "
+    "power_monitor receiving POWERMON_CRANK_CHANGE with CRANK_LOW, and process_crank_low() "
+    "initiating shutdown. Instead, the logs show...'\n"
+    "(9) When relay steps are involved, trace the FULL ignition event flow from the "
+    "nd_device_services firmware perspective: physical relay → MSP/AON detection → "
+    "APM IGNS_worker → sysfs write → power_monitor GPIO/poll → process_crank_low/high.\n"
+    "(10) Look for service-specific error patterns in device logs: "
+    "'CRANK_ERROR' (GPIO read failure), 'registercallback failed' (APM interrupt setup failed), "
+    "'Keep alive timeout' (SVC detected dead service), 'unable to read file in crank_level' "
+    "(GPIO file inaccessible), 'write to sysfs failed' (APM couldn't update ignition status).\n"
+    "(11) Output should include a section mapping automation steps to device behavior: "
+    "for each key step, show what the automation did and what the device services did internally."
 )
 
 AI_USER_TEMPLATE = """A test case FAILED. Analyze the data below and determine the root cause.
 
-IMPORTANT: Do NOT just state what failed (e.g. "log message not found"). Instead, reason about WHY the device
-didn't produce the expected behavior. Think about what each test step is trying to do — for example, if a relay
-is turned off, the test is simulating ignition OFF and expecting the device to detect low crank voltage.
-If a search_logs step fails, it means the device didn't behave as expected — explain WHY.
+IMPORTANT INSTRUCTIONS:
+1. Do NOT just state what failed (e.g. "log message not found"). Reason about WHY using your knowledge
+   of the nd_device_services firmware (power_monitor, APM, SVC, nd_central, etc.).
+2. For EACH automation step, explain what should have happened inside the device services AND what
+   the device logs actually show happened.
+3. Trace the full event chain through the firmware: relay → MSP/AON → APM → sysfs → power_monitor.
+4. If a search_logs step fails, use the IGNITION EVENT FLOW to identify which step in the
+   firmware chain broke.
 
 FAILED STEP:
 {failed_step}
@@ -1706,19 +1834,27 @@ TEST SOURCE CODE:
 Respond with this structure:
 
 ## Root Cause
-Identify the exact failure reason at the device/firmware level. Quote specific log lines or error messages.
-If a log search failed, explain what device behavior was expected and why it didn't happen.
+Identify the exact failure reason at the device/firmware level. Reference the specific firmware service
+and function where the failure occurred (e.g. "power_monitor's check_uptime() was never called because
+APM's IGNS_worker failed to detect the ignition change"). Quote specific log lines as evidence.
+
+## Automation vs Device Correlation
+For each key automation step, show:
+- **Automation step**: What the test did (e.g. relay off, sleep 60s, search_logs)
+- **Expected device behavior**: What should have happened in the firmware services
+- **Actual device behavior**: What the device logs show happened (or didn't happen)
 
 ## What Happened (Timeline)
-Step-by-step breakdown of events leading to failure. Explain what each step was trying to verify.
+Step-by-step breakdown tracing through the firmware event chain.
 
 ## Possible Causes (Ranked)
-1. **[High]** ... (most likely hardware/firmware/timing cause)
+1. **[High]** ... (cite specific firmware service/function)
 2. **[Medium]** ...
 3. **[Low]** ...
 
 ## Suggested Fixes
-Actionable recommendations for the QA team (e.g. check relay, increase wait time, verify device config).
+Actionable recommendations referencing specific firmware behaviors (e.g. check if APM motion_detection
+is enabled adding 180s delay, increase sleep time in test, verify GPIO file readability).
 
 ## Confidence: High / Medium / Low
 Explain why.
@@ -1852,26 +1988,24 @@ Be concise. Output a bullet-point summary of findings. If nothing relevant, say 
 """
 
 DEEP_REDUCE_PROMPT = """You are a senior QA engineer at Netradyne with deep knowledge of the nd_test_bot Test Automation Framework
-and the Netradyne Driveri dashcam hardware/firmware.
+AND the nd_device_services firmware (C++ services running on the dashcam device).
+
+You understand the complete firmware architecture:
+- power_monitor [PWR]: monitors crank voltage via GPIO, manages shutdown/suspend. check_uptime() logs
+  "low crank level; check_uptime is deactivated" when crank != CRANK_HIGH.
+- APM [APM]: Advanced Power Management with IGNS_worker (ignition interrupt with debounce), writes to sysfs.
+  If apm_motion_detection enabled, waits 180s before writing IGNITION_OFF.
+- SVC [SVC]: Service supervisor, receives keepalive from all services, kicks hardware watchdog.
+- nd_central/bagheera [NDC]: Main recording service, switches processing_mode on ignition changes.
+- circular_buffer [CB]: SD card management and file lifecycle.
+- End-to-end ignition flow: relay → MSP/AON → APM IGNS_worker → sysfs → power_monitor GPIO/poll → process_crank_low/high
 
 Multiple chunks of data from a failed test case have been analyzed independently.
 Below are the summaries from each chunk, plus the test steps and failed step info.
 
-YOU KNOW:
-- Test cases define dict_list with STEP_N entries calling API methods like Calculator_obj.run_command_on_device
-- Steps use use_result() to reference saved results from prior steps
-- validate_data conditions determine pass/fail branching (continue/exit/jump)
-- Device types: Krait (K1/K2) and Bagheera (B2/B3) with different file paths
-- Common APIs: Calculator, FilesController, DeviceController, CloudApi, LogAnalyzer, FileUtils
-- Relay board controls physical ignition: relay off = ignition OFF, relay on = ignition ON
-- When ignition turns OFF, device should detect low crank voltage → power_mon logs "low crank level" → check_uptime deactivated → graceful shutdown
-- When ignition turns ON, device boots, services start, recording begins
-- search_logs failures mean THE DEVICE didn't produce the expected behavior, not that the test is wrong
-
 YOUR TASK: Synthesize all chunk summaries into a final root cause analysis.
-THINK DEEPLY about WHY a failure happened at the device/hardware/firmware level, not just WHAT failed.
-For example: if a log message wasn't found after relay off, reason about whether the relay actually cut power,
-whether the device had time to detect the voltage change, whether the service was running, etc.
+For EACH automation step, correlate with what the device firmware should have done internally.
+When a log search fails, trace through the full ignition event chain to identify where it broke.
 
 FAILED STEP:
 {failed_step}
@@ -1886,21 +2020,25 @@ TEST STEPS:
 Respond with this structure:
 
 ## Root Cause
-Identify the exact failure reason at the device/firmware level. Don't just say "message not found" —
-explain WHY the device didn't produce the expected behavior. Reference specific findings from the chunk summaries.
+Identify the exact failure at the firmware service level. Reference specific functions like
+process_crank_low(), check_uptime(), ignition_cb_func(), etc. DO NOT just say "message not found".
+
+## Automation vs Device Correlation
+For each key automation step, show:
+- **Automation step**: What the test did
+- **Expected device behavior**: What the firmware services should have done
+- **Actual device behavior**: What the device logs/chunk summaries show
 
 ## What Happened (Timeline)
-Step-by-step breakdown of events leading to failure. Include what the test was trying to verify
-(e.g. "This test verifies that when ignition is turned off, the device correctly detects low crank voltage
-and transitions to shutdown state").
+Trace through the firmware event chain: relay → MSP/AON → APM → sysfs → power_monitor.
 
 ## Possible Causes (Ranked)
-1. **[High]** ... (most likely device/hardware/timing cause)
+1. **[High]** ... (cite specific firmware service/function/config)
 2. **[Medium]** ...
 3. **[Low]** ...
 
 ## Suggested Fixes
-Actionable recommendations for the QA team (e.g. check relay hardware, increase wait time, verify device config).
+Actionable recommendations referencing firmware behaviors and configs.
 
 ## Confidence: High / Medium / Low
 Explain why.
