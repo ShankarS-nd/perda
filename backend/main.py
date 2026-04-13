@@ -1777,43 +1777,48 @@ AI_SYSTEM_PROMPT = (
     "    * Wrong log file: the message might be in a different service log\n\n"
 
     "ANALYSIS RULES:\n"
-    "(1) Be specific — cite exact log lines, timestamps, error messages.\n"
-    "(2) Map test step failures back to the dict_list STEP structure.\n"
-    "(3) When you see 'STEP_N_status == Fail', trace which API method was called and why it returned Fail.\n"
-    "(4) Check if use_result() references have valid data from prior steps.\n"
-    "(5) Do NOT give generic advice like 'check the logs' or 'verify the method'.\n"
-    "(6) If data is missing, say so explicitly.\n"
-    "(7) CRITICAL: When a log search fails (search_logs returns Fail), do NOT just say "
-    "'the message was not found'. Instead, reason about WHY the device did not produce that "
-    "message using the IGNITION EVENT FLOW above. Trace through the full chain: "
-    "relay → MSP/AON → APM → sysfs → power_monitor → check_uptime. "
-    "Identify which step in this chain likely failed.\n"
-    "(8) CORRELATE automation steps with device logs: for each automation step, explain what "
-    "SHOULD have happened inside the device services and what the device logs actually show. "
-    "Example: 'After S1 (relay off), the device logs should show APM detecting IGNITION_OFF, "
-    "power_monitor receiving POWERMON_CRANK_CHANGE with CRANK_LOW, and process_crank_low() "
-    "initiating shutdown. Instead, the logs show...'\n"
-    "(9) When relay steps are involved, trace the FULL ignition event flow from the "
-    "nd_device_services firmware perspective: physical relay → MSP/AON detection → "
-    "APM IGNS_worker → sysfs write → power_monitor GPIO/poll → process_crank_low/high.\n"
-    "(10) Look for service-specific error patterns in device logs: "
-    "'CRANK_ERROR' (GPIO read failure), 'registercallback failed' (APM interrupt setup failed), "
-    "'Keep alive timeout' (SVC detected dead service), 'unable to read file in crank_level' "
-    "(GPIO file inaccessible), 'write to sysfs failed' (APM couldn't update ignition status).\n"
-    "(11) Output should include a section mapping automation steps to device behavior: "
-    "for each key step, show what the automation did and what the device services did internally."
+    "(1) EVERY CLAIM MUST HAVE LOG EVIDENCE. Never say 'X happened' without quoting the actual log line "
+    "that proves it. If no log line exists, say 'No evidence found in the provided logs for X'.\n"
+    "(2) QUOTE ACTUAL LOG LINES: Copy-paste the exact line from automation logs or device logs. "
+    "Format: '> automation_log: <exact line>' or '> device_log: <exact line>'. "
+    "Include the timestamp/epoch from the log line.\n"
+    "(3) For EACH automation step (PreCondition, S1, S2, etc.), find the corresponding lines "
+    "in the automation logs that show WHEN it executed and WHAT the result was. Quote those lines.\n"
+    "(4) For EACH automation step, find the corresponding lines in the device logs that show "
+    "what the DEVICE did during that time window. Quote those lines. If no device log entries "
+    "exist for that time window, that itself is a clue — say 'No device log activity found "
+    "between timestamp X and Y, which means the service did not react to this event'.\n"
+    "(5) Do NOT describe firmware functions in the abstract (e.g. 'process_crank_low() should have "
+    "been called'). Instead, look at the actual device logs and say: 'The device log shows "
+    "<quoted line> at timestamp X, which means process_crank_low() DID/DID NOT execute'.\n"
+    "(6) BAD example (DO NOT DO THIS): 'The process_crank_low() function is missing or "
+    "incorrectly implemented.' — This is useless without log evidence.\n"
+    "GOOD example: 'After relay off at automation log line \'S1: relay 0 off → Pass\', "
+    "the device logs show \'1712345678000: 5: PWR: I: inside process_crank_low\' at "
+    "timestamp 1712345678, confirming process_crank_low() DID execute. However, there is "
+    "no subsequent log line for check_uptime(), meaning...'\n"
+    "(7) When a log search fails (search_logs returns Fail), search through the provided "
+    "device logs yourself. Look for the search string or related messages. Report what you "
+    "find or don't find: 'I searched the provided device logs for \'low crank level\' and "
+    "found no match. The last power_monitor log entry is <quoted line> at timestamp X.'\n"
+    "(8) Map test step failures back to the dict_list STEP structure.\n"
+    "(9) Check if use_result() references have valid data from prior steps.\n"
+    "(10) Do NOT give generic advice like 'review the function' or 'verify the implementation'. "
+    "Instead, point to specific log lines that reveal the problem.\n"
+    "(11) If the provided logs are insufficient to determine root cause, say so explicitly: "
+    "'The provided device logs do not contain power_monitor entries. Request power_mon logs to diagnose.'"
 )
 
 AI_USER_TEMPLATE = """A test case FAILED. Analyze the data below and determine the root cause.
 
-IMPORTANT INSTRUCTIONS:
-1. Do NOT just state what failed (e.g. "log message not found"). Reason about WHY using your knowledge
-   of the nd_device_services firmware (power_monitor, APM, SVC, nd_central, etc.).
-2. For EACH automation step, explain what should have happened inside the device services AND what
-   the device logs actually show happened.
-3. Trace the full event chain through the firmware: relay → MSP/AON → APM → sysfs → power_monitor.
-4. If a search_logs step fails, use the IGNITION EVENT FLOW to identify which step in the
-   firmware chain broke.
+CRITICAL: Your analysis MUST quote actual log lines as evidence for every claim.
+- For automation logs: quote the exact line showing when each step ran and its result.
+- For device logs: quote the exact lines showing what the device firmware did (or didn't do)
+  during each automation step's time window.
+- If a log line you expect is MISSING, say so: "No power_monitor log entry found between
+  timestamp X and Y, meaning the service did not detect the crank change."
+- NEVER say "the function was not implemented" or "the function failed" without quoting
+  the log lines that prove it.
 
 FAILED STEP:
 {failed_step}
@@ -1834,30 +1839,37 @@ TEST SOURCE CODE:
 Respond with this structure:
 
 ## Root Cause
-Identify the exact failure reason at the device/firmware level. Reference the specific firmware service
-and function where the failure occurred (e.g. "power_monitor's check_uptime() was never called because
-APM's IGNS_worker failed to detect the ignition change"). Quote specific log lines as evidence.
+State the root cause with quoted log evidence.
+BAD: "process_crank_low() was not implemented correctly."
+GOOD: "The device logs show no 'inside process_crank_low' message after the relay was turned off
+at automation log line '> S1: relay_off → Pass'. The last power_monitor entry is:
+> device_log: '1712345678000: 5: PWR: I: inside direct_polling_crank_level'
+This means power_monitor was polling but never received the crank change event."
 
-## Automation vs Device Correlation
-For each key automation step, show:
-- **Automation step**: What the test did (e.g. relay off, sleep 60s, search_logs)
-- **Expected device behavior**: What should have happened in the firmware services
-- **Actual device behavior**: What the device logs show happened (or didn't happen)
+## Automation vs Device Log Correlation
+For EACH automation step, quote the actual log lines:
+
+### Step [name] — [Pass/Fail]
+- **Automation log**: > [quote the exact automation log line for this step]
+- **Device log at this time**: > [quote device log lines from the same time window]
+  OR: "No device log entries found between timestamp X and Y"
+- **Interpretation**: What this tells us about the firmware behavior
+
+(Repeat for every step)
 
 ## What Happened (Timeline)
-Step-by-step breakdown tracing through the firmware event chain.
+Chronological breakdown with quoted timestamps from both log sources.
 
 ## Possible Causes (Ranked)
-1. **[High]** ... (cite specific firmware service/function)
-2. **[Medium]** ...
+1. **[High]** ... (with log evidence: > quoted line)
+2. **[Medium]** ... (with log evidence or "no evidence found for X")
 3. **[Low]** ...
 
 ## Suggested Fixes
-Actionable recommendations referencing specific firmware behaviors (e.g. check if APM motion_detection
-is enabled adding 180s delay, increase sleep time in test, verify GPIO file readability).
+Specific actions with references to what the logs revealed.
 
 ## Confidence: High / Medium / Low
-Explain why.
+Based on how much log evidence was available.
 """
 
 
@@ -1967,45 +1979,36 @@ async def tc_analysis_ai(payload: AiAnalysisRequest):
 # ---------------------------------------------------------------------------
 
 DEEP_MAP_PROMPT = """You are analyzing a CHUNK of data from a failed Netradyne dashcam test case (nd_test_bot framework).
-Summarize ONLY what is relevant to the failure. Focus on:
-- Errors, exceptions, unexpected values
-- State changes (values going from expected to unexpected)
-- Timing anomalies (long gaps between events, timeouts)
-- STEP_N_status values and which API methods were called
-- SSH connection issues, file generation failures
-- use_result() references that may have empty/wrong data
-- Relay state changes and whether the device responded correctly to ignition events
-- Log search results — if a search_logs step failed, note what message was expected and in which service log
-- Any line that looks abnormal even if not flagged as error
-- Signs of service crashes, restarts, or missing services in device logs
+Extract ONLY findings relevant to the failure. For EACH finding, QUOTE the exact log line as evidence.
 
-IMPORTANT: When you see a log search failure, don't just say "message not found". Note:
-- What message was being searched for and in which log file
-- What the message would indicate about device behavior (e.g. "low crank level" means device detected ignition off)
-- Any log entries that show the device was in a DIFFERENT state than expected
+Focus on:
+- Errors, exceptions, unexpected values — QUOTE the exact line
+- STEP_N_status values and results — QUOTE the line showing Pass/Fail
+- Timing: note timestamps of key events. Flag gaps > 30s between steps
+- Relay state changes — QUOTE the automation log line showing relay on/off
+- For device logs: QUOTE any lines containing: crank, ignition, shutdown, CRANK_LOW, CRANK_HIGH,
+  process_crank, check_uptime, direct_polling, POWERMON, IGNS, sysfs, Keep alive timeout
+- If search_logs failed: QUOTE what was searched, then search this chunk for that string yourself.
+  Report if you find it or not
+- Signs of service crashes or missing keepalive — QUOTE the line
 
-Be concise. Output a bullet-point summary of findings. If nothing relevant, say "No relevant findings in this chunk."
+Format each finding as:
+- **Finding**: [description]
+  > log: [exact quoted line from the chunk]
+
+If nothing relevant, say "No relevant findings in this chunk."
 """
 
-DEEP_REDUCE_PROMPT = """You are a senior QA engineer at Netradyne with deep knowledge of the nd_test_bot Test Automation Framework
-AND the nd_device_services firmware (C++ services running on the dashcam device).
+DEEP_REDUCE_PROMPT = """You are a senior QA engineer at Netradyne analyzing a failed test case.
+You have chunk summaries with QUOTED log lines from automation and device logs.
 
-You understand the complete firmware architecture:
-- power_monitor [PWR]: monitors crank voltage via GPIO, manages shutdown/suspend. check_uptime() logs
-  "low crank level; check_uptime is deactivated" when crank != CRANK_HIGH.
-- APM [APM]: Advanced Power Management with IGNS_worker (ignition interrupt with debounce), writes to sysfs.
-  If apm_motion_detection enabled, waits 180s before writing IGNITION_OFF.
-- SVC [SVC]: Service supervisor, receives keepalive from all services, kicks hardware watchdog.
-- nd_central/bagheera [NDC]: Main recording service, switches processing_mode on ignition changes.
-- circular_buffer [CB]: SD card management and file lifecycle.
-- End-to-end ignition flow: relay → MSP/AON → APM IGNS_worker → sysfs → power_monitor GPIO/poll → process_crank_low/high
+You understand the firmware: power_monitor (check_uptime, process_crank_low/high, GPIO polling),
+APM (IGNS_worker, sysfs write, motion detection delay), SVC (keepalive watchdog), nd_central (recording).
+Ignition flow: relay → MSP/AON → APM → sysfs → power_monitor GPIO/poll → process_crank_low/high.
 
-Multiple chunks of data from a failed test case have been analyzed independently.
-Below are the summaries from each chunk, plus the test steps and failed step info.
-
-YOUR TASK: Synthesize all chunk summaries into a final root cause analysis.
-For EACH automation step, correlate with what the device firmware should have done internally.
-When a log search fails, trace through the full ignition event chain to identify where it broke.
+CRITICAL RULE: Every claim MUST quote a log line from the chunk summaries as evidence.
+Never say "X function failed" without quoting the log line that proves it.
+If no log evidence exists for a claim, say "No log evidence found for X".
 
 FAILED STEP:
 {failed_step}
@@ -2013,35 +2016,37 @@ FAILED STEP:
 TEST STEPS:
 {test_steps}
 
---- CHUNK SUMMARIES ---
+--- CHUNK SUMMARIES (with quoted log lines) ---
 {chunk_summaries}
 
 ---
 Respond with this structure:
 
 ## Root Cause
-Identify the exact failure at the firmware service level. Reference specific functions like
-process_crank_low(), check_uptime(), ignition_cb_func(), etc. DO NOT just say "message not found".
+State the root cause. MUST include quoted log lines as evidence:
+> log: [exact line from chunk summaries]
+Explain what this line means in the firmware context.
 
-## Automation vs Device Correlation
-For each key automation step, show:
-- **Automation step**: What the test did
-- **Expected device behavior**: What the firmware services should have done
-- **Actual device behavior**: What the device logs/chunk summaries show
+## Automation vs Device Log Correlation
+For EACH key step, quote the automation log line AND the corresponding device log line:
+### Step [name]
+- **Automation**: > [quoted line]
+- **Device at this time**: > [quoted line] OR "No device log entry found"
+- **Means**: [interpretation]
 
 ## What Happened (Timeline)
-Trace through the firmware event chain: relay → MSP/AON → APM → sysfs → power_monitor.
+Chronological with quoted timestamps from the chunk summaries.
 
 ## Possible Causes (Ranked)
-1. **[High]** ... (cite specific firmware service/function/config)
+1. **[High]** ... > evidence: [quoted line]
 2. **[Medium]** ...
 3. **[Low]** ...
 
 ## Suggested Fixes
-Actionable recommendations referencing firmware behaviors and configs.
+Based on what the logs revealed.
 
 ## Confidence: High / Medium / Low
-Explain why.
+Based on how much log evidence was available.
 """
 
 
