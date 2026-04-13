@@ -1343,11 +1343,7 @@ class DeviceLogReadRequest(BaseModel):
 
 @app.get("/aws-sso/status")
 async def aws_sso_status():
-    """Check if the AWS SSO token for the s3view profile is still valid.
-    On DTA server (DTA_SERVER=1) the EC2 instance role is used, so profile
-    checks are skipped."""
-    if _os.environ.get("DTA_SERVER"):
-        return {"valid": True}
+    """Check if the AWS SSO token for the s3view profile is still valid."""
     import shutil as _sh
     aws_bin = _sh.which("aws")
     if not aws_bin:
@@ -1414,7 +1410,7 @@ async def device_log_download(payload: DeviceLogDownloadRequest):
             except Exception as profile_err:
                 profiles = ""
                 yield f"data: {json.dumps({'type': 'stdout', 'text': f'WARNING: could not read AWS profiles ({profile_err}). Attempting download anyway.'})}\n\n"
-            if not _os.environ.get("DTA_SERVER") and profiles and "s3view" not in profiles:
+            if profiles and "s3view" not in profiles:
                 yield f"data: {json.dumps({'type': 'stdout', 'text': 'ERROR: AWS profile s3view not configured. Run: aws configure --profile s3view'})}\n\n"
                 yield f"data: {json.dumps({'type': 'exit', 'code': 1})}\n\n"
                 return
