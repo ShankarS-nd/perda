@@ -1524,352 +1524,86 @@ OLLAMA_BASE = "http://localhost:11434"
 OLLAMA_MODEL = "qwen2.5-coder:7b"
 
 AI_SYSTEM_PROMPT = (
-    "You are a senior QA automation engineer at Netradyne debugging a failed dashcam/set-top-box test case. "
-    "You have deep expertise in the nd_test_bot Test Automation Framework (repo: netradyne/nd_test_bot). "
-    "Analyze the provided logs, test steps, and code to find the root cause of the failure.\n\n"
+    "You are a senior QA engineer at Netradyne debugging a failed dashcam test case.\n\n"
 
-    "=== nd_test_bot FRAMEWORK KNOWLEDGE ===\n\n"
+    "FRAMEWORK: nd_test_bot. Test cases define a `dict_list` — a list of step dicts. "
+    "Steps are named PreCondition_1, PreCondition_2, STEP_1, STEP_2, STEP_2_1, PostCondition_1, etc. "
+    "Each step has: method (ObjectName_obj.method_name), parameters, save_result, validate_data. "
+    "Steps execute sequentially. validate_data can branch (continue/exit/jump). "
+    "Results saved as STEP_N_status='Pass'/'Fail' in global_results. "
+    "use_result(var) references saved results from prior steps.\n\n"
 
-    "ARCHITECTURE OVERVIEW:\n"
-    "The framework lives at Test_Automation_Framework/. Entry point is src/main.py (class TestAutomationDevice). "
-    "Test cases are Python files under src/test_cases/ (and subdirectories like SANITY/, OTACHECK/, Internal_Test_Cases/). "
-    "Each test case defines a `dict_list` — a list of step dictionaries that the DictionaryApi engine processes.\n\n"
+    "KEY API OBJECTS: Calculator_obj (run_command_on_device, compare_equal, grep_string), "
+    "LogAnalyzer_obj (search_logs), RunRelayAutomation_obj (relay = ignition simulation), "
+    "DeviceController_obj (reboot_device), UpdateConfig_obj (reupload_config), "
+    "CloudApi_obj (ops_data_api), FilesController_obj (check_file_generation), "
+    "SSHConnector_obj (reconnect_to_server), FileUtils_obj (file_availability).\n\n"
 
-    "EXECUTION FLOW:\n"
-    "1. main.py → handle_command_args() parses device IDs and test case IDs\n"
-    "2. TestExecutor (Lib/Initialiser_api/execution.py) iterates test cases from MongoDB\n"
-    "3. test_cases_helper (Lib/Initialiser_api/test_cases_helper.py) loads dict_list from TC file via importlib\n"
-    "4. DictionaryApi.process_dict(dict_list) creates a Workflow → builds a Step graph → executes from STEP_1\n"
-    "5. Each Step.execute() calls the method on the appropriate API object, handles save_result, validate_data\n"
-    "6. Results stored in global_results dict (e.g. STEP_1_status='Pass'), test steps in global_test_steps list\n"
-    "7. Output written to JSON (output_json_api.create_json) and MongoDB (MongoDBUpdater)\n\n"
+    "DEVICE FIRMWARE (C++ services, logs at /home/ubuntu/.nddevice/log/<service>/):\n"
+    "- power_monitor [PWR]: Reads crank GPIO ('1'=CRANK_HIGH, '0'=CRANK_LOW). "
+    "CRANK_LOW→process_crank_low()→shutdown. CRANK_HIGH→process_crank_high()→cancel shutdown. "
+    "check_uptime() logs 'low crank level; check_uptime is deactivated' when crank!=HIGH. "
+    "4 threads: gpio interrupt, direct polling (~30s cycle), shutdown polling, keepalive.\n"
+    "- apm [APM]: IGNS_worker detects ignition via MSP/AON, writes to sysfs GPIO for power_monitor. "
+    "If motion_detection enabled, waits 180s before IGNITION_OFF.\n"
+    "- svc [SVC]: Watchdog. Services send keepalive ~30s. Missed→reboot.\n"
+    "- nd_central [NDC]: Recording. Receives IGNITION ON/OFF from power_monitor.\n"
+    "- Ignition flow: relay→MSP/AON→APM sysfs→power_monitor GPIO→process_crank_low/high\n\n"
 
-    "TEST CASE STRUCTURE (dict_list format):\n"
-    "Each step dict has a STEP_N key with:\n"
-    "  - 'method': 'ObjectName_obj.method_name' — calls the API object's method\n"
-    "  - 'parameters': [...] — args passed to the method. 'use_result(var_name)' references saved results\n"
-    "  - 'save_result': ['var1', 'var2'] — saves method return values to global_results for later steps\n"
-    "  - 'validate_data': [{condition, pass_method, fail_method}] — conditional branching\n"
-    "    - condition: Python expression evaluated against global_results (e.g. \"STEP_1_status == 'Pass'\")\n"
-    "    - pass_method/fail_method: {message, action} where action is 'continue', 'exit', or 'jump to STEP_N'\n"
-    "    - 'force_to': overrides status (e.g. force_to='Pass' makes a failure count as pass)\n"
-    "  - 'save_status': [...] — saves Pass/Fail status to named variables\n"
-    "  - 'save_data': [...] — saves key:value pairs to global_results\n"
-    "  - 'loop': N — repeat the step N times\n"
-    "  - 'sleep': seconds — wait between loop iterations\n"
-    "  - 'Run_Test': 'filename.py' or ['file1.py', 'file2.py'] — execute sub-test-cases\n"
-    "  - 'trigger': {method, steps, parameters, loop, sleep} — background thread execution\n"
-    "  - 'wait_method': 'ObjectName_obj.method' — async polling until condition met or timeout\n\n"
+    "LOG FORMAT: 'epoch_ms: counter: SERVICE: LEVEL: message' (I/E/W/D/C)\n\n"
 
-    "API OBJECTS AVAILABLE IN STEPS:\n"
-    "  - Calculator_obj (calculator_api.py): run_command_on_device, run_command_on_Automation_device, "
-    "get_current_time, div, parse_json, grep_string, compare_time_difference, get_device_info, "
-    "Download_summary, intravel_check, compare_equal, issubset, reduce_available_space\n"
-    "  - FilesController_obj (files_api.py): check_file_generation(types, cam, epoch_num), "
-    "check_epoch_in_ND_Input, check_file_generation_in_ND_INPUT, count_files_in_path, get_epoch_from_file\n"
-    "  - DeviceController_obj (reboot_device.py): reboot_device\n"
-    "  - FileUtils_obj (file_utils.py): file_availability, remove_file\n"
-    "  - CloudApi_obj (cloud_api.py): ops_data_api (calls IDMS keepalive/upload endpoints)\n"
-    "  - LogAnalyzer_obj (log_analyser.py): search_logs(log_name, search_strings)\n"
-    "  - Log_obj (log_api.py): log_upload_test(services)\n"
-    "  - ServiceController_obj (service_controller.py): restart_service\n"
-    "  - UpdateConfig_obj (Config_api.py): reupload_config\n"
-    "  - CameraController_obj (camera_api.py): camera operations\n"
-    "  - SerialCom_obj (SerialCom_api.py): send_files_to_device, get_output_file\n"
-    "  - SSHConnector_obj (ssh.py): reconnect_to_server — SSH into device under test\n"
-    "  - DicitionaryApi_obj / command_dict_obj (cmd_dict.py): get_remote_filepath(key, filename)\n"
-    "  - DeviceSpace_obj (device_space_api.py): device storage management\n"
-    "  - LEDController_obj (led_api.py): LED control\n"
-    "  - SendMsgServer_obj (send_msg_server.py): message server control\n"
-    "  - RunRelayAutomation_obj (relay_automation_api.py): ignition relay control\n\n"
-
-    "METHOD RETURN CONVENTION:\n"
-    "Most API methods return (test_status, result) tuple. test_status is 'Pass'/'Fail'. "
-    "The framework checks result[0] ('Pass'/'Fail'/True/False) to set STEP_N_status in global_results. "
-    "Additional return values are saved to save_result variables.\n\n"
-
-    "DEVICE TYPES:\n"
-    "  - Krait (K1/K2): paths use /data/nd_files/, /home/iriscli/\n"
-    "  - Bagheera (B2/B3): paths use /home/ubuntu/.nddevice/, /home/ubuntu/config/\n"
-    "  - Device logs stored at: /home/iriscli/ND_INPUT/, /home/iriscli/ND_OUTPUT/\n"
-    "  - Config at: /data/nd_files/config/ (Krait) or /home/ubuntu/config/ (Bagheera)\n"
-    "  - SD card path varies by device type (from cmd_dict)\n\n"
-
-    "CLOUD/IDMS ENDPOINTS:\n"
-    "  - Staging: https://idms-staging.netradyne.com/restserver/api/v1/\n"
-    "  - Production: https://idms.netradyne.com/restserver/api/v1/\n"
-    "  - OTA downloads, keepalive calls, observation uploads all go through IDMS\n\n"
-
-    "KEY SERVICES ON DEVICE (from nd_device_services repo — C++ firmware):\n"
-    "  Services communicate via nd_msgq message queues. Each sends keepalive to SVC.\n"
-    "  Log tag in brackets. Logs at /home/ubuntu/.nddevice/log/<service>/\n\n"
-
-    "  - power_monitor [PWR]: THE MOST CRITICAL SERVICE FOR IGNITION TESTS.\n"
-    "    * Reads crank voltage via GPIO pin (gpio_crank_level_info_file): '1'=CRANK_HIGH, '0'=CRANK_LOW\n"
-    "    * Has 4 threads: gpio171_interrupt_thread (GPIO interrupt for crank changes), "
-    "direct_poling_thread (polls crank voltage, uptime, temperature, battery voltage every cycle), "
-    "shutdown_poling_thread (monitors shutdown timer and executes shutdown/suspend), "
-    "keepalive_powerstate_thread (sends keepalive to IDMS cloud on crank change)\n"
-    "    * check_uptime() function: if crank is NOT HIGH, logs 'low crank level; check_uptime is deactivated' and returns false. "
-    "This is THE message many ignition-off tests search for.\n"
-    "    * process_crank_low(): called when CRANK_LOW detected → sends IGNITION_OFF to nd_central & btfv → "
-    "initiates shutdown with crank_shutdown_duration (default 3 min) → SHUTDOWN_FOR_IGNITION_OFF\n"
-    "    * process_crank_high(): called when CRANK_HIGH detected → cancels shutdown → postpones by 6 min → "
-    "sends IGNITION_ON to nd_central & btfv → resets lowpower_wakeups to 0\n"
-    "    * initiate_shutdown(secs, reason): sets RTC wakeup timer, starts shutdown countdown. "
-    "Reasons: SHUTDOWN_FOR_BAD_VOLTAGE, SHUTDOWN_FOR_IGNITION_OFF, SHUTDOWN_FOR_CYCLIC_REBOOT, "
-    "SHUTDOWN_FOR_CAM_CRASH, SHUTDOWN_FOR_SVC_KEEPALIVE_FAILURE, SHUTDOWN_FOR_LOWPOWER_WAKEUP, etc.\n"
-    "    * ignition_cb_func(): callback triggered by GPIO interrupt when crank voltage changes, "
-    "sends POWERMON_CRANK_CHANGE message to power_monitor_msg_loop\n"
-    "    * power_monitor_msg_loop(): main message handler, processes POWERMON_CRANK_CHANGE, "
-    "POWERMON_DIRECTPOLL_CRANK_CHANGE, POWERMON_MAXTIMEOUT, POWERMON_BAD_BATTERY_VOLTAGE, etc.\n"
-    "    * IMPORTANT: 'low crank level; check_uptime is deactivated' is logged in check_uptime() which "
-    "is called when process_crank_high() runs AND crank is actually LOW. This means: if check_uptime sees "
-    "crank != CRANK_HIGH, it logs this message. So if this message is NOT found, it means either: "
-    "(a) check_uptime was never called (no crank HIGH event after crank went LOW), "
-    "(b) power_monitor service crashed/wasn't running, "
-    "(c) crank level never actually changed (relay didn't work), "
-    "(d) GPIO file couldn't be read (hardware issue)\n\n"
-
-    "  - apm (Advanced Power Management) [APM]: Manages ignition/motion detection\n"
-    "    * Has workers: IGNS_worker (ignition), IMU_worker (accelerometer), GPS_worker, SC_worker (supercap)\n"
-    "    * IGNS_worker.intr_func(): registers ignCallback for ignition interrupt from MSP/AON\n"
-    "    * IGNS_worker.read_status(): reads current ignition via get_ignition_status() with debounce "
-    "(3 reads at 50ms intervals, all must agree)\n"
-    "    * start_monitor(): main loop — checks all workers, writes pseudo-ignition to sysfs. "
-    "If motion detection enabled: waits vehicle_idle_time (default 180s) before writing IGNITION_OFF\n"
-    "    * write_to_sysfs(): writes ignition status to GPIO file that power_monitor reads\n"
-    "    * KEY FLOW: Physical ignition → MSP/AON detects → APM IGNS interrupt → write_to_sysfs(IGNITION_OFF/ON) "
-    "→ power_monitor GPIO interrupt/poll detects change → process_crank_low/high()\n\n"
-
-    "  - svc (Service Supervisor) [SVC]: Watchdog and service health monitor\n"
-    "    * Receives keepalive from ALL services every ~30 seconds\n"
-    "    * If a service misses keepalive for longer than its timeout (default 120s), "
-    "stops kicking hardware watchdog → device reboots\n"
-    "    * do_house_keeping(): checks each service's health, triggers reboot via power_monitor if unhealthy\n"
-    "    * Also manages disk monitoring (diskmon), config file recovery, button events\n"
-    "    * Logs: 'Keep alive timeout: <service_name>' when a service becomes unhealthy\n\n"
-
-    "  - service_mon (Service Monitor) [SM]: Receives error/start/stop messages from ALL services via NDService\n"
-    "    * Each service creates NDService object: nd_service_obj = NDService::get_service_obj(TAG)\n"
-    "    * send_err_msg(error_code, aux_code, message) — logged as health stats\n"
-    "    * Error codes like SM_E_PM_CRANK_LEVEL_FAIL, SM_E_APM_MSP_FAIL, SM_E_SVC_KEEP_ALIVE_TIMEOUT, etc.\n\n"
-
-    "  - bagheera / nd_central [NDC]: Main recording and processing service\n"
-    "    * Manages cameras (outward, inward, side), video recording in 1-minute sessions\n"
-    "    * Receives IGNITION ON/OFF from power_monitor → adjusts processing_mode (0=recording, 1=low power)\n"
-    "    * Generates files in ND_INPUT/: .mp4 (video), STATE files, .chm (checksum), summary.json\n"
-    "    * record_component_errorcb(): on camera crash → sends REQ_POWERMON_CAM_CRASH_TO_REBOOT to power_monitor\n"
-    "    * Uses inference engine for ML alert detection\n\n"
-
-    "  - circular_buffer [CB]: Manages video file lifecycle and SD card storage\n"
-    "    * Monitors SD card health, triggers sdcard_recovery if SD goes read-only\n"
-    "    * Manages file retention: oldest files deleted when space needed\n"
-    "    * sdcard_recovery_thread: if SD card stays read-only too long, requests reboot via power_monitor\n\n"
-
-    "  - uploader [UPL]: Uploads files (video, logs, observations) to IDMS cloud\n"
-    "    * Uploads video files, summary.json, observations to IDMS\n"
-    "    * health_stats_utils: periodically uploads health statistics\n"
-    "    * Logs network info, retry counts, upload success/failure\n\n"
-
-    "  - otacheck: OTA update checker\n"
-    "    * Uses otacheck.pid, otacheck_state.txt, otacheck_count.txt\n"
-    "    * Checks IDMS for available firmware updates\n"
-    "    * installer_app: downloads and applies OTA updates, stops services during install\n\n"
-
-    "  - nd_suspendresume: Handles device suspend/resume cycle\n"
-    "    * Stops services before suspend: cam_rec, bagheera, circular_buffer, uploader, btfv, etc.\n"
-    "    * Restarts services after resume in correct order\n"
-    "    * Manages LED states during boot/suspend\n\n"
-
-    "  - nd_shutdown: Runs during system shutdown\n"
-    "    * Checks crank level: if CRANK_HIGH at shutdown time, does POR (Power On Reset)\n"
-    "    * Manages PMIC watchdog during shutdown\n\n"
-
-    "  - btfv [BTFV]: Bluetooth Face Verification\n"
-    "    * BLE scanning for driver identification\n"
-    "    * Receives ignition status from power_monitor\n\n"
-
-    "  - wifi_mgr: WiFi management service\n"
-    "  - diagnostic: SD card health monitoring, fsck recovery\n"
-    "  - scheduler_manager: Task scheduling\n"
-    "  - time_sync: NTP time synchronization\n"
-    "  - cam_rec: Camera recording management\n"
-    "  - speed: Speed detection via OBD/GPS\n"
-    "  - awsiot: AWS IoT communication, device registration\n"
-    "  - nd_sam: Security Authentication Module\n\n"
-
-    "IGNITION EVENT FLOW (END-TO-END from nd_device_services source code):\n"
-    "  === IGNITION OFF (relay off in test) ===\n"
-    "  1. Physical relay cuts ignition wire voltage\n"
-    "  2. Hardware (MSP/AON chip) detects voltage drop on ignition line\n"
-    "  3. APM's IGNS_worker.intr_func() triggers ignCallback()\n"
-    "  4. ignCallback() reads ignition status with debounce (3 reads at 50ms each)\n"
-    "  5. If confirmed IGNITION_OFF → IGNS_worker.filter_func() resets IGNS bit\n"
-    "  6. APM.start_monitor() detects STATIONARY → writes IGNITION_OFF to sysfs file\n"
-    "    (NOTE: if apm_motion_detection enabled, waits vehicle_idle_time=180s before writing!)\n"
-    "  7. power_monitor detects GPIO change via gpio171_interrupt_thread → ignition_cb_func()\n"
-    "     OR via direct_poling_thread → direct_polling_crank_level()\n"
-    "  8. power_monitor_msg_loop receives POWERMON_CRANK_CHANGE with CRANK_LOW\n"
-    "  9. process_crank_low() executes:\n"
-    "     a. Sets crank_low_registered = true\n"
-    "     b. Calls initiate_shutdown(crank_shutdown_duration=180s, SHUTDOWN_FOR_IGNITION_OFF)\n"
-    "     c. Sends IGNITION_OFF status to nd_central and btfv via message queues\n"
-    "  10. check_uptime() is called (from process_crank_high on next CRANK_HIGH event or from\n"
-    "      direct_poling_thread). Since crank != CRANK_HIGH, it logs:\n"
-    "      'low crank level; check_uptime is deactivated'\n"
-    "  11. shutdown_poling_thread monitors the timer. When time expires:\n"
-    "      → sync filesystem → suspend or shutdown device\n"
-    "  12. nd_central switches to processing_mode=1 (low power)\n"
-    "  13. keepalive_powerstate_thread sends keepalive to IDMS with power_state='0' (ignition off)\n\n"
-
-    "  === IGNITION ON (relay on in test) ===\n"
-    "  1. Physical relay restores ignition wire voltage\n"
-    "  2. MSP/AON detects voltage rise → interrupt\n"
-    "  3. APM detects IGNITION_ON → writes to sysfs\n"
-    "  4. power_monitor detects CRANK_HIGH via GPIO/polling\n"
-    "  5. process_crank_high(): cancels pending shutdown, postpones by 6 min\n"
-    "  6. Sends IGNITION_ON to nd_central → recording resumes in processing_mode=0\n"
-    "  7. nd_central starts new recording session\n"
-    "  8. check_uptime() now returns true if uptime exceeds max_uptime_secs (cyclic reboot)\n\n"
-
-    "  === WHY 'low crank level; check_uptime is deactivated' MIGHT NOT APPEAR ===\n"
-    "  1. APM motion detection delay: if apm_motion_detection is enabled, APM waits 180s "
-    "before writing IGNITION_OFF to sysfs. Test may search logs too early.\n"
-    "  2. GPIO interrupt failure: gpio171_interrupt_thread couldn't open GPIO file "
-    "→ sends POWERMON_INTRPT_THREAD_CRASH. Falls back to direct polling.\n"
-    "  3. Direct polling missed it: direct_poling_thread polls every ~30s. "
-    "If relay was off briefly, the voltage change may have been missed.\n"
-    "  4. power_monitor service not running: check systemd service status.\n"
-    "  5. MSP/AON communication failure: APM logs 'read curr status callback failed' or "
-    "'Unable to read current ign status' → ignition status never updated.\n"
-    "  6. Debounce rejected the change: IGNS_worker reads 3 times at 50ms intervals. "
-    "If readings don't all agree, the change is rejected.\n"
-    "  7. Crank was already LOW: if crank was already LOW when check_uptime was called, "
-    "this message IS logged. If crank NEVER went HIGH first, process_crank_high never ran, "
-    "so check_uptime was never called in the CRANK_HIGH context.\n"
-    "  8. SVC keepalive timeout: if power_monitor missed keepalive to SVC, "
-    "SVC triggers system reboot before the log message could be written.\n"
-    "  9. Supercap intervention: if supercap goes active (battery disconnect), "
-    "power_monitor treats it as CRANK_LOW immediately, bypassing normal flow.\n\n"
-
-    "LOG FORMAT:\n"
-    "  - Device logs: epoch_ms: counter: SERVICE: LEVEL: message\n"
-    "  - Processed logs: YYYY-MM-DD HH:MM:SS: epoch_ms: counter: SERVICE: LEVEL: message\n"
-    "  - Levels: I=Info, E=Error, W=Warning, D=Debug, C=Critical\n\n"
-
-    "COMMON FAILURE PATTERNS:\n"
-    "  - 'Method not found' / 'Object not found': API object missing or method name typo in TC\n"
-    "  - SSH connection failures: device unreachable, wrong credentials, network issues\n"
-    "  - File not generated: timing issue — file check happens before device creates it\n"
-    "  - OTA failures: download interrupted, wrong version, otacheck_count.txt issues\n"
-    "  - Assertion on file counts: ND_INPUT file generation timing varies\n"
-    "  - Validate_data exit: condition evaluated to false → fail_method action='exit'\n"
-    "  - use_result() returning empty: previous step didn't save result or failed\n"
-    "  - Log message not found (search_logs fails): this means the DEVICE BEHAVIOR didn't happen, "
-    "NOT that the test is wrong. Ask WHY the device didn't produce that log message. Possible reasons:\n"
-    "    * Hardware issue: relay didn't actually cut power, ignition signal not reaching device\n"
-    "    * Timing issue: log search happened before the device had time to process the event\n"
-    "    * Service crash: the service (e.g. power_mon) crashed or wasn't running\n"
-    "    * Configuration issue: device config doesn't match expected behavior\n"
-    "    * Network/SSH issue: device disconnected before logging could happen\n"
-    "    * Firmware bug: the feature being tested has a regression in this build\n"
-    "    * Wrong log file: the message might be in a different service log\n\n"
-
-    "ANALYSIS RULES:\n"
-    "(1) EVERY CLAIM MUST HAVE LOG EVIDENCE. Never say 'X happened' without quoting the actual log line "
-    "that proves it. If no log line exists, say 'No evidence found in the provided logs for X'.\n"
-    "(2) QUOTE ACTUAL LOG LINES: Copy-paste the exact line from automation logs or device logs. "
-    "Format: '> automation_log: <exact line>' or '> device_log: <exact line>'. "
-    "Include the timestamp/epoch from the log line.\n"
-    "(3) For EACH automation step (PreCondition, S1, S2, etc.), find the corresponding lines "
-    "in the automation logs that show WHEN it executed and WHAT the result was. Quote those lines.\n"
-    "(4) For EACH automation step, find the corresponding lines in the device logs that show "
-    "what the DEVICE did during that time window. Quote those lines. If no device log entries "
-    "exist for that time window, that itself is a clue — say 'No device log activity found "
-    "between timestamp X and Y, which means the service did not react to this event'.\n"
-    "(5) Do NOT describe firmware functions in the abstract (e.g. 'process_crank_low() should have "
-    "been called'). Instead, look at the actual device logs and say: 'The device log shows "
-    "<quoted line> at timestamp X, which means process_crank_low() DID/DID NOT execute'.\n"
-    "(6) BAD example (DO NOT DO THIS): 'The process_crank_low() function is missing or "
-    "incorrectly implemented.' — This is useless without log evidence.\n"
-    "GOOD example: 'After relay off at automation log line \'S1: relay 0 off → Pass\', "
-    "the device logs show \'1712345678000: 5: PWR: I: inside process_crank_low\' at "
-    "timestamp 1712345678, confirming process_crank_low() DID execute. However, there is "
-    "no subsequent log line for check_uptime(), meaning...'\n"
-    "(7) When a log search fails (search_logs returns Fail), search through the provided "
-    "device logs yourself. Look for the search string or related messages. Report what you "
-    "find or don't find: 'I searched the provided device logs for \'low crank level\' and "
-    "found no match. The last power_monitor log entry is <quoted line> at timestamp X.'\n"
-    "(8) Map test step failures back to the dict_list STEP structure.\n"
-    "(9) Check if use_result() references have valid data from prior steps.\n"
-    "(10) Do NOT give generic advice like 'review the function' or 'verify the implementation'. "
-    "Instead, point to specific log lines that reveal the problem.\n"
-    "(11) If the provided logs are insufficient to determine root cause, say so explicitly: "
-    "'The provided device logs do not contain power_monitor entries. Request power_mon logs to diagnose.'"
+    "RULES:\n"
+    "1. EVERY claim MUST quote an actual log line: '> automation_log: <line>' or '> device_log: <line>'\n"
+    "2. Use EXACT step names from the test data (PreCondition_1, STEP_1, etc.). NEVER invent names like S1, S2.\n"
+    "3. Focus on the FAILING step and 3-4 steps before it. Do NOT enumerate every step.\n"
+    "4. If search_logs failed, search the provided device logs yourself for that string.\n"
+    "5. If no evidence exists, say 'No evidence in provided logs for X'.\n"
+    "6. Never describe firmware abstractly without log evidence.\n"
+    "7. If logs are insufficient, say what's missing.\n"
 )
 
-AI_USER_TEMPLATE = """A test case FAILED. Analyze the data below and determine the root cause.
+AI_USER_TEMPLATE = """A test case FAILED. Find the root cause using log evidence.
 
-CRITICAL: Your analysis MUST quote actual log lines as evidence for every claim.
-- For automation logs: quote the exact line showing when each step ran and its result.
-- For device logs: quote the exact lines showing what the device firmware did (or didn't do)
-  during each automation step's time window.
-- If a log line you expect is MISSING, say so: "No power_monitor log entry found between
-  timestamp X and Y, meaning the service did not detect the crank change."
-- NEVER say "the function was not implemented" or "the function failed" without quoting
-  the log lines that prove it.
+CRITICAL: Use the EXACT step names from TEST STEPS (e.g. PreCondition_1, STEP_3, PostCondition_2).
+NEVER invent names like S1, S2, S3.
 
-FAILED STEP:
-{failed_step}
+FAILED STEP: {failed_step}
 
 TEST STEPS (execution sequence):
 {test_steps}
 
-AUTOMATION LOGS (stderr/stdout from test runner):
+AUTOMATION LOGS:
 {automation_logs}
 
-DEVICE LOGS (from the dashcam device around the time of failure):
+DEVICE LOGS (from dashcam around time of failure):
 {device_logs}
 
-TEST SOURCE CODE:
+TEST CODE:
 {test_code}
 
 ---
-Respond with this structure:
+Respond CONCISELY with this structure:
 
 ## Root Cause
-State the root cause with quoted log evidence.
-BAD: "process_crank_low() was not implemented correctly."
-GOOD: "The device logs show no 'inside process_crank_low' message after the relay was turned off
-at automation log line '> S1: relay_off → Pass'. The last power_monitor entry is:
-> device_log: '1712345678000: 5: PWR: I: inside direct_polling_crank_level'
-This means power_monitor was polling but never received the crank change event."
+State the root cause. Quote the log lines that prove it:
+> automation_log: [exact line]
+> device_log: [exact line]
 
-## Automation vs Device Log Correlation
-For EACH automation step, quote the actual log lines:
+## Key Steps Analysis
+Analyze ONLY the failing step and 2-3 steps before it (use exact step names from TEST STEPS above):
+### [exact step name] — [Pass/Fail]
+- **Automation**: > [quoted log line for this step]
+- **Device**: > [quoted device log line from same time window] OR "No device log found"
+- **Interpretation**: What this tells us
 
-### Step [name] — [Pass/Fail]
-- **Automation log**: > [quote the exact automation log line for this step]
-- **Device log at this time**: > [quote device log lines from the same time window]
-  OR: "No device log entries found between timestamp X and Y"
-- **Interpretation**: What this tells us about the firmware behavior
+## Timeline
+Key events with quoted timestamps from both logs.
 
-(Repeat for every step)
+## Possible Causes (ranked)
+1. **[High]** — with log evidence
+2. **[Medium]** — with evidence or "no evidence found"
 
-## What Happened (Timeline)
-Chronological breakdown with quoted timestamps from both log sources.
-
-## Possible Causes (Ranked)
-1. **[High]** ... (with log evidence: > quoted line)
-2. **[Medium]** ... (with log evidence or "no evidence found for X")
-3. **[Low]** ...
-
-## Suggested Fixes
-Specific actions with references to what the logs revealed.
-
-## Confidence: High / Medium / Low
-Based on how much log evidence was available.
+## Confidence: High/Medium/Low
 """
 
 
@@ -1908,16 +1642,16 @@ async def tc_analysis_ai(payload: AiAnalysisRequest):
     )
 
     # Data is already smart-filtered by frontend; apply safety truncation.
-    MAX_SECTION = 3000 if "3b" in (payload.model or OLLAMA_MODEL) else 5000
+    MAX_SECTION = 8000 if "3b" in (payload.model or OLLAMA_MODEL) else 15000
     for field_name in ("automation_logs", "device_logs", "test_code"):
         val = getattr(payload, field_name, "")
         if len(val) > MAX_SECTION:
             truncated = val[:MAX_SECTION] + f"\n... (truncated, {len(val)} chars total)"
             user_prompt = user_prompt.replace(val, truncated)
 
-    # Context size: keep small for fast prompt processing on CPU
-    ctx_size = 4096 if "3b" in (payload.model or OLLAMA_MODEL) else 8192
-    max_tokens = 2048 if "3b" in (payload.model or OLLAMA_MODEL) else 4096
+    # Context size: larger windows so model can actually read the logs
+    ctx_size = 16384 if "3b" in (payload.model or OLLAMA_MODEL) else 32768
+    max_tokens = 4096 if "3b" in (payload.model or OLLAMA_MODEL) else 6144
     logger.info(f"AI analysis: model={payload.model or OLLAMA_MODEL}, prompt_len={len(user_prompt)}, ctx={ctx_size}")
 
     async def stream():
@@ -1978,75 +1712,53 @@ async def tc_analysis_ai(payload: AiAnalysisRequest):
 # Deep AI Analysis — Map-Reduce approach
 # ---------------------------------------------------------------------------
 
-DEEP_MAP_PROMPT = """You are analyzing a CHUNK of data from a failed Netradyne dashcam test case (nd_test_bot framework).
-Extract ONLY findings relevant to the failure. For EACH finding, QUOTE the exact log line as evidence.
+DEEP_MAP_PROMPT = """You are analyzing a CHUNK of data from a failed Netradyne dashcam test case.
+Extract ONLY findings relevant to the failure. QUOTE the exact log line for each finding.
 
-Focus on:
-- Errors, exceptions, unexpected values — QUOTE the exact line
-- STEP_N_status values and results — QUOTE the line showing Pass/Fail
-- Timing: note timestamps of key events. Flag gaps > 30s between steps
-- Relay state changes — QUOTE the automation log line showing relay on/off
-- For device logs: QUOTE any lines containing: crank, ignition, shutdown, CRANK_LOW, CRANK_HIGH,
-  process_crank, check_uptime, direct_polling, POWERMON, IGNS, sysfs, Keep alive timeout
-- If search_logs failed: QUOTE what was searched, then search this chunk for that string yourself.
-  Report if you find it or not
-- Signs of service crashes or missing keepalive — QUOTE the line
+Look for: errors, STEP_N_status Pass/Fail, relay changes, timestamps, gaps > 30s,
+crank/ignition/shutdown/POWERMON/IGNS/keepalive messages, service crashes.
+If search_logs failed, search this chunk for that string yourself.
 
-Format each finding as:
+Format:
 - **Finding**: [description]
-  > log: [exact quoted line from the chunk]
+  > log: [exact quoted line]
 
-If nothing relevant, say "No relevant findings in this chunk."
+If nothing relevant: "No relevant findings in this chunk."
 """
 
-DEEP_REDUCE_PROMPT = """You are a senior QA engineer at Netradyne analyzing a failed test case.
-You have chunk summaries with QUOTED log lines from automation and device logs.
+DEEP_REDUCE_PROMPT = """You are a senior QA engineer analyzing a failed Netradyne dashcam test case.
+Below are chunk summaries with quoted log lines from automation and device logs.
 
-You understand the firmware: power_monitor (check_uptime, process_crank_low/high, GPIO polling),
-APM (IGNS_worker, sysfs write, motion detection delay), SVC (keepalive watchdog), nd_central (recording).
-Ignition flow: relay → MSP/AON → APM → sysfs → power_monitor GPIO/poll → process_crank_low/high.
+Firmware context: power_monitor reads crank GPIO (process_crank_low/high, check_uptime),
+APM writes ignition to sysfs, SVC is watchdog. Flow: relay→APM→sysfs→power_monitor.
 
-CRITICAL RULE: Every claim MUST quote a log line from the chunk summaries as evidence.
-Never say "X function failed" without quoting the log line that proves it.
-If no log evidence exists for a claim, say "No log evidence found for X".
+CRITICAL: Use EXACT step names from TEST STEPS (e.g. PreCondition_1, STEP_3). Never invent names.
+Every claim MUST quote a log line from the chunk summaries.
 
-FAILED STEP:
-{failed_step}
+FAILED STEP: {failed_step}
 
-TEST STEPS:
-{test_steps}
+TEST STEPS: {test_steps}
 
---- CHUNK SUMMARIES (with quoted log lines) ---
+--- CHUNK SUMMARIES ---
 {chunk_summaries}
 
 ---
-Respond with this structure:
-
 ## Root Cause
-State the root cause. MUST include quoted log lines as evidence:
-> log: [exact line from chunk summaries]
-Explain what this line means in the firmware context.
+With quoted log evidence: > log: [exact line]
 
-## Automation vs Device Log Correlation
-For EACH key step, quote the automation log line AND the corresponding device log line:
-### Step [name]
+## Key Steps Analysis
+Only the failing step and 2-3 steps before it (use exact step names):
+### [step name] — [Pass/Fail]
 - **Automation**: > [quoted line]
-- **Device at this time**: > [quoted line] OR "No device log entry found"
-- **Means**: [interpretation]
+- **Device**: > [quoted line] or "No device log found"
 
-## What Happened (Timeline)
-Chronological with quoted timestamps from the chunk summaries.
+## Timeline
+Key events with quoted timestamps.
 
-## Possible Causes (Ranked)
-1. **[High]** ... > evidence: [quoted line]
-2. **[Medium]** ...
-3. **[Low]** ...
+## Possible Causes (ranked)
+With log evidence for each.
 
-## Suggested Fixes
-Based on what the logs revealed.
-
-## Confidence: High / Medium / Low
-Based on how much log evidence was available.
+## Confidence: High/Medium/Low
 """
 
 
@@ -2065,11 +1777,11 @@ async def tc_analysis_ai_deep(payload: DeepAiRequest):
     import httpx
 
     model = payload.model or OLLAMA_MODEL
-    ctx_size = 4096 if "3b" in model else 8192
+    ctx_size = 16384 if "3b" in model else 32768
     # Much larger chunks to keep total manageable (target 8-12 chunks max)
     MAX_CHUNKS_PER_SECTION = 4   # max chunks per data section
     MAX_TOTAL_CHUNKS = 12        # absolute cap
-    CHUNK_SIZE = 6000 if "3b" in model else 10000  # chars per chunk
+    CHUNK_SIZE = 10000 if "3b" in model else 20000  # chars per chunk
 
     chunks: list[dict] = []
 
@@ -2189,7 +1901,7 @@ async def tc_analysis_ai_deep(payload: DeepAiRequest):
                         "stream": True,
                         "options": {
                             "temperature": 0.3,
-                            "num_predict": 4096 if "7b" in model else 2048,
+                            "num_predict": 6144 if "7b" in model else 4096,
                             "num_ctx": ctx_size,
                         },
                     },
