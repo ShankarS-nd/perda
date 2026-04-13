@@ -553,10 +553,14 @@ export default function TCAnalysis() {
 
     // ── SMART FILTERING: send only the critical window of data ──
 
-    // 1. Steps — send all (they're small)
+    // 1. Steps — send all (they're small). Format: "StepName [Status]: description"
     const stepsText = (data.steps || []).map(s => {
       const [desc, status] = Object.entries(s)[0] ?? ["", ""];
-      return `[${String(status).padEnd(5)}] ${desc}`;
+      // desc looks like "PreCondition_1: Turn on relay" — extract the step name part
+      const colonIdx = desc.indexOf(":");
+      const stepName = colonIdx > 0 ? desc.slice(0, colonIdx).trim() : desc;
+      const stepDesc = colonIdx > 0 ? desc.slice(colonIdx + 1).trim() : "";
+      return `${stepName} [${String(status).trim()}]: ${stepDesc}`;
     }).join("\n");
 
     // 2. Find the failed step(s)
@@ -596,27 +600,29 @@ export default function TCAnalysis() {
     }
     const autoLogs = autoLogSlice.join("\n");
 
-    // 4. Device logs — ±30 sec window around the test's end_time
-    //    end_time is when the failure happened
+    // 4. Device logs — cover full test duration (start_time to end_time + 60s)
+    //    Use dlLogs (unfiltered) so AI sees all services, not just user's current filter
     let devLogSlice: DeviceLogEntry[] = [];
+    const startTimeMs = data.start_time ? new Date(data.start_time.replace(" ", "T") + "Z").getTime() : null;
     const endTimeMs = data.end_time ? new Date(data.end_time.replace(" ", "T") + "Z").getTime() : null;
-    if (endTimeMs && !isNaN(endTimeMs)) {
-      const windowMs = 30_000; // ±30 seconds
-      devLogSlice = dlFilteredLogs.filter(e =>
+    if (startTimeMs && endTimeMs && !isNaN(startTimeMs) && !isNaN(endTimeMs)) {
+      const beforeMs = 60_000; // 60s before test start
+      const afterMs = 60_000;  // 60s after test end
+      devLogSlice = dlLogs.filter(e =>
         e.epoch_ms != null &&
-        e.epoch_ms >= endTimeMs - windowMs &&
-        e.epoch_ms <= endTimeMs + windowMs
+        e.epoch_ms >= startTimeMs - beforeMs &&
+        e.epoch_ms <= endTimeMs + afterMs
       );
-      // If window is empty (timestamp mismatch), try last 60 entries
+      // If window is empty (timestamp mismatch), try last 200 entries
       if (devLogSlice.length === 0) {
-        devLogSlice = dlFilteredLogs.slice(-60);
+        devLogSlice = dlLogs.slice(-200);
       }
     } else {
-      // No timestamp available — take last 60 entries
-      devLogSlice = dlFilteredLogs.slice(-60);
+      // No timestamps available — take last 200 entries
+      devLogSlice = dlLogs.slice(-200);
     }
-    // Cap at 200 entries max
-    if (devLogSlice.length > 200) devLogSlice = devLogSlice.slice(-200);
+    // Cap at 500 entries max (with larger context, we can afford more)
+    if (devLogSlice.length > 500) devLogSlice = devLogSlice.slice(-500);
     const devLogs = devLogSlice.map(e => {
       const ts = e.epoch_ms ? new Date(e.epoch_ms).toISOString().replace("T", " ").slice(0, 19) : "—";
       return `${ts}  ${e.service}  ${e.level}  ${parseDlMessage(e.line)}`;
@@ -735,7 +741,7 @@ export default function TCAnalysis() {
       setAiLoading(false);
       setAiStatus("");
     }
-  }, [data, dlFilteredLogs, sourceData, aiModel]);
+  }, [data, dlLogs, sourceData, aiModel]);
 
   // ── Deep Analysis (Map-Reduce) ──
   const runDeepAnalysis = useCallback(async () => {
@@ -754,7 +760,10 @@ export default function TCAnalysis() {
     // Send ALL data — no smart filtering, the backend will chunk it
     const stepsText = (data.steps || []).map(s => {
       const [desc, status] = Object.entries(s)[0] ?? ["", ""];
-      return `[${String(status).padEnd(5)}] ${desc}`;
+      const colonIdx = desc.indexOf(":");
+      const stepName = colonIdx > 0 ? desc.slice(0, colonIdx).trim() : desc;
+      const stepDesc = colonIdx > 0 ? desc.slice(colonIdx + 1).trim() : "";
+      return `${stepName} [${String(status).trim()}]: ${stepDesc}`;
     }).join("\n");
 
     const failedStep = (data.steps || []).filter(s => {
@@ -762,13 +771,16 @@ export default function TCAnalysis() {
       return status === "FAIL" || status === "FALSE" || status === "0";
     }).map(s => {
       const [desc, status] = Object.entries(s)[0] ?? ["", ""];
-      return `[${status}] ${desc}`;
+      const colonIdx = desc.indexOf(":");
+      const stepName = colonIdx > 0 ? desc.slice(0, colonIdx).trim() : desc;
+      const stepDesc = colonIdx > 0 ? desc.slice(colonIdx + 1).trim() : "";
+      return `${stepName} [${status}]: ${stepDesc}`;
     }).join("\n") || "(no explicit failed step found)";
 
     // ALL automation logs
     const autoLogs = data.logs.join("\n");
 
-    // ALL device logs (unfiltered from dlLogs, not dlFilteredLogs)
+    // ALL device logs (unfiltered from dlLogs)
     const devLogs = dlLogs.map(e => {
       const ts = e.epoch_ms ? new Date(e.epoch_ms).toISOString().replace("T", " ").slice(0, 19) : "—";
       return `${ts}  ${e.service}  ${e.level}  ${parseDlMessage(e.line)}`;
