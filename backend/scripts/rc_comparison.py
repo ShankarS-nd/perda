@@ -348,15 +348,21 @@ def fetch_report_js_from_url(
 ) -> tuple[str, str, str]:
     """Fetch DAST report scr.js from an arbitrary Jenkins build URL.
 
+    If the URL points to a different host than the default Jenkins server,
+    an unauthenticated session is used automatically.
+
     Parameters:
         jenkins_url: Full Jenkins build URL, e.g.
             https://build-device.netradyne.info/view/.../job/SomeJob/123/
-        session: Authenticated requests session.
+            http://10.200.8.71:8080/job/EXT_CAM_NEW_SETUP/31/Test_5freport/
+        session: Authenticated requests session (used for default host).
         use_cache: Whether to check local cache first.
 
     Returns:
         (js_content, job_base_url, build_number)
     """
+    from urllib.parse import urlparse
+
     job_base_url, build_number = parse_jenkins_url(jenkins_url)
     cache_key = _url_cache_key(job_base_url, build_number)
     cache_file = SCRJS_CACHE_DIR / f"{cache_key}.js"
@@ -365,23 +371,37 @@ def fetch_report_js_from_url(
         print(f"  ✓ Using cached scr.js for {cache_key} ({cache_file.stat().st_size:,} bytes)")
         return cache_file.read_text(encoding="utf-8"), job_base_url, build_number
 
+    # Use an unauthenticated session if the URL is on a different host
+    default_host = urlparse(JENKINS_BASE_URL).netloc
+    url_host = urlparse(job_base_url).netloc
+    if url_host != default_host:
+        print(f"  ℹ Different Jenkins host ({url_host}), using unauthenticated session")
+        sess = requests.Session()
+        sess.headers.update({"User-Agent": "Perda-RC-Comparison/1.0"})
+        sess.verify = False
+    else:
+        sess = session
+
+    is_default_host = (url_host == default_host)
+
     # Try published scr.js
     pub_url = f"{job_base_url}/{build_number}/Test_5freport/static/scr.js"
     print(f"  ↓ Trying published report data: {pub_url}")
     js: str | None = None
     try:
-        resp = session.get(pub_url, timeout=180, allow_redirects=False)
-        if _is_auth_redirect(resp):
-            sys.exit(
-                "❌ Jenkins authentication failed (redirect to login). "
-                "Your JENKINS_TOKEN has likely expired."
-            )
-        _check_auth(resp)
+        resp = sess.get(pub_url, timeout=180, allow_redirects=not is_default_host)
+        if is_default_host:
+            if _is_auth_redirect(resp):
+                sys.exit(
+                    "❌ Jenkins authentication failed (redirect to login). "
+                    "Your JENKINS_TOKEN has likely expired."
+                )
+            _check_auth(resp)
         if resp.status_code == 200:
             print(f"    ✓ Downloaded ({len(resp.content):,} bytes)")
             js = resp.text
-        elif resp.status_code in (301, 302, 303, 307, 308):
-            resp2 = session.get(resp.headers.get("Location", pub_url), timeout=180)
+        elif is_default_host and resp.status_code in (301, 302, 303, 307, 308):
+            resp2 = sess.get(resp.headers.get("Location", pub_url), timeout=180)
             _check_auth(resp2)
             if resp2.status_code == 200:
                 js = resp2.text
@@ -393,12 +413,13 @@ def fetch_report_js_from_url(
         art_url = f"{job_base_url}/{build_number}/artifact/report/report.tar.gz"
         print(f"  ↓ Trying artifact: {art_url}")
         try:
-            resp = session.get(art_url, timeout=300, stream=True, allow_redirects=False)
-            if _is_auth_redirect(resp):
-                sys.exit("❌ Jenkins auth failed (redirect to login).")
-            _check_auth(resp)
-            if resp.status_code in (301, 302, 303, 307, 308):
-                resp = session.get(resp.headers.get("Location", art_url), timeout=300, stream=True)
+            resp = sess.get(art_url, timeout=300, stream=True, allow_redirects=not is_default_host)
+            if is_default_host:
+                if _is_auth_redirect(resp):
+                    sys.exit("❌ Jenkins auth failed (redirect to login).")
+                _check_auth(resp)
+            if is_default_host and resp.status_code in (301, 302, 303, 307, 308):
+                resp = sess.get(resp.headers.get("Location", art_url), timeout=300, stream=True)
                 _check_auth(resp)
             if resp.status_code == 404:
                 raise RuntimeError(
@@ -496,16 +517,28 @@ def fetch_dast_counts_from_url(
     build_number: str,
     session: requests.Session,
 ) -> tuple[int | None, int | None]:
-    """Like fetch_dast_known_unknown_counts but with a custom job base URL."""
+    """Like fetch_dast_known_unknown_counts but with a custom job base URL.
+
+    Uses an unauthenticated session if the host differs from the default.
+    """
+    from urllib.parse import urlparse
+
+    default_host = urlparse(JENKINS_BASE_URL).netloc
+    url_host = urlparse(job_base_url).netloc
+    if url_host != default_host:
+        sess = requests.Session()
+        sess.headers.update({"User-Agent": "Perda-RC-Comparison/1.0"})
+        sess.verify = False
+    else:
+        sess = session
+
     known: int | None = None
     unknown: int | None = None
 
     for page, label in [("linked_issues.html", "known"), ("unknown_issue.html", "unknown")]:
         url = f"{job_base_url}/{build_number}/Test_5freport/{page}"
         try:
-            resp = session.get(url, timeout=30, allow_redirects=False)
-            if _is_auth_redirect(resp):
-                continue
+            resp = sess.get(url, timeout=30, allow_redirects=True)
             if resp.status_code != 200 or len(resp.content) < 100:
                 continue
             text = resp.text[:5000]
