@@ -762,6 +762,39 @@ async def test_report_summary(payload: TestReportRequest):
         known_graph.append({"service": svc, "count": k})
         unknown_graph.append({"service": svc, "count": u})
 
+    # ── Unique services (present in one build but not the other) ──
+    rc1_services = set(tc1["Service"].dropna().unique())
+    rc2_services = set(tc2["Service"].dropna().unique())
+    only_in_rc1 = sorted(rc1_services - rc2_services)
+    only_in_rc2 = sorted(rc2_services - rc1_services)
+
+    def _svc_summary(df: pd.DataFrame, services: list) -> dict:
+        """Build {service: {total, pass, fail, ne, tcs: [...]}} for given services."""
+        result: dict[str, dict] = {}
+        for svc in services:
+            svc_tcs = df[df["Service"] == svc]
+            total = len(svc_tcs)
+            passed = int((svc_tcs["Result"] == "PASS").sum())
+            failed = int((svc_tcs["Result"] == "FAIL").sum())
+            ne = int((svc_tcs["Result"] == "NE").sum())
+            tcs = []
+            for _, row in svc_tcs.iterrows():
+                tc_id = extract_tc_id(row["Testcase Name"])
+                entry: dict = {"tc_id": tc_id, "name": row["Testcase Name"], "result": row["Result"]}
+                if "Error Data" in row:
+                    entry["error"] = str(row["Error Data"]) if str(row["Error Data"]).upper() not in ("NA", "NAN") else ""
+                if "Linked Issues" in row:
+                    entry["linked"] = str(row["Linked Issues"]) if is_linked(row["Linked Issues"]) else ""
+                tcs.append(entry)
+            tcs.sort(key=lambda x: x["tc_id"])
+            result[svc] = {"total": total, "pass": passed, "fail": failed, "ne": ne, "tcs": tcs}
+        return result
+
+    unique_services = {
+        "only_in_rc1": _svc_summary(tc1, only_in_rc1),
+        "only_in_rc2": _svc_summary(tc2, only_in_rc2),
+    }
+
     # ── Confidence data for regression TCs ──
     # Use stored platform builds to compute pass-rate for regression TCs
     platform_builds = _load_platform_builds()
@@ -927,6 +960,7 @@ async def test_report_summary(payload: TestReportRequest):
             "known": known_graph,
             "unknown": unknown_graph,
         },
+        "unique_services": unique_services,
     }
 
 

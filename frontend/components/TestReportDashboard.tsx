@@ -78,6 +78,27 @@ interface RegressionConfidence {
   unknown: ConfBuckets | Record<string, never>;
 }
 
+interface UniqueSvcTCEntry {
+  tc_id: string;
+  name: string;
+  result: string;
+  error?: string;
+  linked?: string;
+}
+
+interface UniqueSvcDetail {
+  total: number;
+  pass: number;
+  fail: number;
+  ne: number;
+  tcs: UniqueSvcTCEntry[];
+}
+
+interface UniqueServices {
+  only_in_rc1: Record<string, UniqueSvcDetail>;
+  only_in_rc2: Record<string, UniqueSvcDetail>;
+}
+
 interface DashboardData {
   platform: string;
   rc1: string;
@@ -101,6 +122,7 @@ interface DashboardData {
     known: GraphPoint[];
     unknown: GraphPoint[];
   };
+  unique_services?: UniqueServices;
 }
 
 // Platforms available
@@ -890,6 +912,52 @@ export default function TestReportDashboard() {
               />
             </div>
           </div>
+
+          {/* ── SECTION 4: Unique Services ── */}
+          {data.unique_services && (Object.keys(data.unique_services.only_in_rc1).length > 0 || Object.keys(data.unique_services.only_in_rc2).length > 0) && (
+            <div>
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <svg className="h-4 w-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+                Services Unique to One Build
+              </h2>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {/* Only in RC1 */}
+                {Object.keys(data.unique_services.only_in_rc1).length > 0 && (
+                  <div className="rounded-xl border border-white/[0.06] bg-[#1a1d28] p-5">
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Only in Build {data.rc1}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/10 font-medium">
+                        {Object.keys(data.unique_services.only_in_rc1).length} service{Object.keys(data.unique_services.only_in_rc1).length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {Object.entries(data.unique_services.only_in_rc1).map(([svc, info]) => (
+                        <UniqueServiceRow key={svc} service={svc} info={info} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Only in RC2 */}
+                {Object.keys(data.unique_services.only_in_rc2).length > 0 && (
+                  <div className="rounded-xl border border-white/[0.06] bg-[#1a1d28] p-5">
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">Only in Build {data.rc2}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/10 font-medium">
+                        {Object.keys(data.unique_services.only_in_rc2).length} service{Object.keys(data.unique_services.only_in_rc2).length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {Object.entries(data.unique_services.only_in_rc2).map(([svc, info]) => (
+                        <UniqueServiceRow key={svc} service={svc} info={info} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1668,5 +1736,53 @@ function Spinner() {
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
     </svg>
+  );
+}
+
+// --- Unique Service Row ---
+
+function UniqueServiceRow({ service, info }: { service: string; info: UniqueSvcDetail }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const resultColor = (r: string) => {
+    switch (r.toUpperCase()) {
+      case "PASS": return "text-emerald-400";
+      case "FAIL": return "text-red-400";
+      case "NE": return "text-gray-400";
+      default: return "text-gray-500";
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-white/[0.04] bg-[#12141c]">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <span className="text-sm font-medium text-gray-200">{service}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-emerald-400">{info.pass}P</span>
+            <span className="text-red-400">{info.fail}F</span>
+            <span className="text-gray-500">{info.ne}NE</span>
+            <span className="text-gray-600">({info.total})</span>
+          </div>
+          <svg className={`h-3.5 w-3.5 text-gray-500 transition-transform ${expanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </div>
+      </button>
+      {expanded && (
+        <div className="px-4 pb-3 space-y-1">
+          {info.tcs.map((tc) => (
+            <div key={tc.tc_id} className="flex items-start gap-3 py-1.5 border-t border-white/[0.03]">
+              <code className="text-[11px] text-gray-500 font-mono shrink-0 mt-0.5">{tc.tc_id}</code>
+              <span className="text-xs text-gray-400 flex-1 leading-relaxed">{tc.name}</span>
+              <span className={`text-[10px] font-semibold shrink-0 ${resultColor(tc.result)}`}>{tc.result}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
