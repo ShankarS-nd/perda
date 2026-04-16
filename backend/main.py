@@ -726,10 +726,18 @@ async def test_report_summary(payload: TestReportRequest):
         (merged["RC1_Result"] == "PASS") & (merged["RC2_Result"] == "FAIL")
     ].copy()
 
-    # ── New TCs (only in rc2, not in rc1) ──
-    new_tcs = merged[merged["RC1_Result"] == "NOT_PRESENT"].copy()
-    # ── Removed TCs (only in rc1, not in rc2) ──
-    removed_tcs = merged[merged["RC2_Result"] == "NOT_PRESENT"].copy()
+    # ── New TCs (only in rc2, not in rc1) — common services only ──
+    # ── Removed TCs (only in rc1, not in rc2) — common services only ──
+    rc1_services = set(tc1["Service"].dropna().unique())
+    rc2_services = set(tc2["Service"].dropna().unique())
+    common_services = rc1_services & rc2_services
+
+    new_tcs = merged[
+        (merged["RC1_Result"] == "NOT_PRESENT") & (merged["Service"].isin(common_services))
+    ].copy()
+    removed_tcs = merged[
+        (merged["RC2_Result"] == "NOT_PRESENT") & (merged["Service"].isin(common_services))
+    ].copy()
 
     def _diff_tc_list(df: pd.DataFrame, result_col: str, error_col: str, linked_col: str) -> dict:
         """Group TCs by service for new/removed TC sections."""
@@ -791,8 +799,6 @@ async def test_report_summary(payload: TestReportRequest):
         unknown_graph.append({"service": svc, "count": u})
 
     # ── Unique services (present in one build but not the other) ──
-    rc1_services = set(tc1["Service"].dropna().unique())
-    rc2_services = set(tc2["Service"].dropna().unique())
     only_in_rc1 = sorted(rc1_services - rc2_services)
     only_in_rc2 = sorted(rc2_services - rc1_services)
 
