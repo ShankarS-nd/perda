@@ -726,6 +726,34 @@ async def test_report_summary(payload: TestReportRequest):
         (merged["RC1_Result"] == "PASS") & (merged["RC2_Result"] == "FAIL")
     ].copy()
 
+    # ── New TCs (only in rc2, not in rc1) ──
+    new_tcs = merged[merged["RC1_Result"] == "NOT_PRESENT"].copy()
+    # ── Removed TCs (only in rc1, not in rc2) ──
+    removed_tcs = merged[merged["RC2_Result"] == "NOT_PRESENT"].copy()
+
+    def _diff_tc_list(df: pd.DataFrame, result_col: str, error_col: str, linked_col: str) -> dict:
+        """Group TCs by service for new/removed TC sections."""
+        result_map: dict[str, list] = {}
+        for _, row in df.iterrows():
+            svc = row.get("Service", "OTHER")
+            tc_id = row["TC_ID"]
+            entry: dict = {
+                "tc_id": tc_id,
+                "name": row["Testcase Name"],
+                "result": str(row.get(result_col, "")),
+            }
+            err_val = str(row.get(error_col, ""))
+            entry["error"] = err_val if err_val.upper() not in ("NA", "NAN", "NAN", "") else ""
+            lnk_val = row.get(linked_col, "")
+            entry["linked"] = str(lnk_val) if is_linked(lnk_val) else ""
+            result_map.setdefault(svc, []).append(entry)
+        for svc in result_map:
+            result_map[svc].sort(key=lambda x: x["tc_id"])
+        return dict(sorted(result_map.items()))
+
+    new_tcs_by_service = _diff_tc_list(new_tcs, "RC2_Result", "RC2_Error", "RC2_Linked")
+    removed_tcs_by_service = _diff_tc_list(removed_tcs, "RC1_Result", "RC1_Error", "RC1_Linked")
+
     # ── Persistent failures (Fail → Fail) ──
     persistent = merged[
         (merged["RC1_Result"] == "FAIL") & (merged["RC2_Result"] == "FAIL")
@@ -956,6 +984,14 @@ async def test_report_summary(payload: TestReportRequest):
             "unknown_by_service": _reg_tc_list(persist_unknown),
         },
         "regression_confidence": reg_confidence,
+        "new_tcs": {
+            "count": len(new_tcs),
+            "by_service": new_tcs_by_service,
+        },
+        "removed_tcs": {
+            "count": len(removed_tcs),
+            "by_service": removed_tcs_by_service,
+        },
         "graphs": {
             "known": known_graph,
             "unknown": unknown_graph,

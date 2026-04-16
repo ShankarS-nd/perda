@@ -99,6 +99,19 @@ interface UniqueServices {
   only_in_rc2: Record<string, UniqueSvcDetail>;
 }
 
+interface DiffTCEntry {
+  tc_id: string;
+  name: string;
+  result: string;
+  error?: string;
+  linked?: string;
+}
+
+interface DiffTCs {
+  count: number;
+  by_service: Record<string, DiffTCEntry[]>;
+}
+
 interface DashboardData {
   platform: string;
   rc1: string;
@@ -118,6 +131,8 @@ interface DashboardData {
   regressions: Regressions;
   persistent_failures: Regressions;
   regression_confidence: RegressionConfidence;
+  new_tcs?: DiffTCs;
+  removed_tcs?: DiffTCs;
   graphs: {
     known: GraphPoint[];
     unknown: GraphPoint[];
@@ -314,6 +329,8 @@ export default function TestReportDashboard() {
       case "reg_unknown": return data.regressions.unknown_by_service;
       case "persist_known": return data.persistent_failures?.known_by_service ?? {};
       case "persist_unknown": return data.persistent_failures?.unknown_by_service ?? {};
+      case "new_tcs": return data.new_tcs?.by_service ?? {};
+      case "removed_tcs": return data.removed_tcs?.by_service ?? {};
       default: return {};
     }
   };
@@ -788,6 +805,44 @@ export default function TestReportDashboard() {
                 }
               />
             )}
+
+            {/* New / Removed TCs boxes */}
+            {((data.new_tcs?.count ?? 0) > 0 || (data.removed_tcs?.count ?? 0) > 0) && (
+              <div className="mt-4">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Test Case Changes</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <MetricBox
+                    label="New Test Cases"
+                    count={data.new_tcs?.count ?? 0}
+                    pct={data.overview.total > 0 ? Math.round(((data.new_tcs?.count ?? 0) / data.overview.total) * 100) : 0}
+                    color="sky"
+                    active={activeBox === "new_tcs"}
+                    onClick={() => handleBoxClick("new_tcs")}
+                    subtitle="Only in current build"
+                  />
+                  <MetricBox
+                    label="Removed Test Cases"
+                    count={data.removed_tcs?.count ?? 0}
+                    pct={data.rc1_overview.total > 0 ? Math.round(((data.removed_tcs?.count ?? 0) / data.rc1_overview.total) * 100) : 0}
+                    color="violet"
+                    active={activeBox === "removed_tcs"}
+                    onClick={() => handleBoxClick("removed_tcs")}
+                    subtitle="Only in previous build"
+                  />
+                </div>
+
+                {/* Drill-down for new/removed TCs */}
+                {activeBox && ["new_tcs", "removed_tcs"].includes(activeBox) && (
+                  <ServiceDrillDown
+                    title={activeBox === "new_tcs" ? "New Test Cases" : "Removed Test Cases"}
+                    services={getServiceData(activeBox)}
+                    expandedService={expandedService}
+                    toggleService={toggleService}
+                    color={activeBox === "new_tcs" ? "sky" : "violet"}
+                  />
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── SECTION 2: Regression Boxes ── */}
@@ -1034,6 +1089,20 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; acce
     text: "text-rose-400",
     accent: "text-rose-300",
     ring: "ring-rose-500/30",
+  },
+  sky: {
+    bg: "bg-sky-500/8",
+    border: "border-sky-500/20",
+    text: "text-sky-400",
+    accent: "text-sky-300",
+    ring: "ring-sky-500/30",
+  },
+  violet: {
+    bg: "bg-violet-500/8",
+    border: "border-violet-500/20",
+    text: "text-violet-400",
+    accent: "text-violet-300",
+    ring: "ring-violet-500/30",
   },
 };
 
