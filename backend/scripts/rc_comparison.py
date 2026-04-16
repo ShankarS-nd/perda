@@ -143,12 +143,18 @@ def parse_jenkins_url(url: str) -> tuple[str, str]:
     Accepts URLs like:
       https://build-device.netradyne.info/view/.../job/SomeJob/123/
       https://build-device.netradyne.info/job/SomeJob/123
+      http://10.200.8.71:8080/job/EXT_CAM_NEW_SETUP/31/Test_5freport/
+      http://host/job/Foo/42/artifact/report/report.tar.gz
+
+    Extra path segments after the build number (Test_5freport/, artifact/,
+    console, etc.) are stripped automatically.
 
     Returns:
       ("https://build-device.netradyne.info/view/.../job/SomeJob", "123")
     """
     url = url.strip().rstrip("/")
-    m = re.match(r"(https?://.+/job/[^/]+)/(\d+)$", url)
+    # Match /job/<name>/<number> anywhere in the URL, ignoring trailing paths
+    m = re.match(r"(https?://.+/job/[^/]+)/(\d+)(?:/.*)?$", url)
     if not m:
         raise ValueError(
             f"Cannot parse Jenkins URL: {url!r}. "
