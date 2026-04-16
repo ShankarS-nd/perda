@@ -148,6 +148,9 @@ export default function TestReportDashboard() {
   // ── Input state ──
   const [rc1, setRc1] = useState("");
   const [rc2, setRc2] = useState("");
+  const [rc1Url, setRc1Url] = useState("");
+  const [rc2Url, setRc2Url] = useState("");
+  const [useUrls, setUseUrls] = useState(false);
   const [platform, setPlatform] = useState("K1_US");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [loading, setLoading] = useState(false);
@@ -233,8 +236,10 @@ export default function TestReportDashboard() {
   };
 
   const fetchReport = useCallback(async (forceRefresh = false) => {
-    if (!rc1.trim() || !rc2.trim()) {
-      setError("Both build numbers are required.");
+    const hasRc1 = rc1.trim() || rc1Url.trim();
+    const hasRc2 = rc2.trim() || rc2Url.trim();
+    if (!hasRc1 || !hasRc2) {
+      setError("Both builds are required. Provide build numbers or direct URLs.");
       return;
     }
     setLoading(true);
@@ -245,10 +250,18 @@ export default function TestReportDashboard() {
     setActiveBox(null);
     setExpandedService(null);
     try {
+      const payload: Record<string, unknown> = {
+        rc1: rc1.trim(),
+        rc2: rc2.trim(),
+        rc1_url: rc1Url.trim(),
+        rc2_url: rc2Url.trim(),
+        platform,
+        force_refresh: forceRefresh,
+      };
       const res = await fetch(`${API_BASE}/test-report-summary`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rc1: rc1.trim(), rc2: rc2.trim(), platform, force_refresh: forceRefresh }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -261,7 +274,7 @@ export default function TestReportDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [rc1, rc2, platform]);
+  }, [rc1, rc2, rc1Url, rc2Url, platform]);
 
   // Map box id → service data
   const getServiceData = (box: string): Record<string, TCEntry[]> => {
@@ -425,7 +438,9 @@ export default function TestReportDashboard() {
 
           {/* Previous Build # */}
           <div className="space-y-2">
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Previous Build #</label>
+            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Previous Build #{useUrls && <span className="text-gray-600 normal-case"> (optional with URL)</span>}
+            </label>
             <input
               type="text"
               value={rc1}
@@ -437,7 +452,9 @@ export default function TestReportDashboard() {
 
           {/* Current Build # */}
           <div className="space-y-2">
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Current Build #</label>
+            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+              Current Build #{useUrls && <span className="text-gray-600 normal-case"> (optional with URL)</span>}
+            </label>
             <input
               type="text"
               value={rc2}
@@ -447,6 +464,50 @@ export default function TestReportDashboard() {
             />
           </div>
         </div>
+
+        {/* ── Direct URL toggle ── */}
+        <div className="mt-5 mb-5">
+          <button
+            type="button"
+            onClick={() => setUseUrls(!useUrls)}
+            className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-300 transition-colors"
+          >
+            <div className={`relative w-8 h-[18px] rounded-full transition-colors ${useUrls ? "bg-indigo-500/40" : "bg-white/10"}`}>
+              <div className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all ${useUrls ? "left-[16px]" : "left-[2px]"}`} />
+            </div>
+            <span>Use Direct Jenkins URLs</span>
+            {useUrls && <span className="text-gray-600 text-[10px]">(URLs override build numbers)</span>}
+          </button>
+        </div>
+
+        {/* ── URL inputs (collapsible) ── */}
+        {useUrls && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-5 mb-5 animate-in fade-in duration-200">
+            {/* Previous Build URL */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Previous Build URL</label>
+              <input
+                type="text"
+                value={rc1Url}
+                onChange={(e) => setRc1Url(e.target.value)}
+                placeholder="https://build-device.netradyne.info/view/.../job/SomeJob/123"
+                className="ds-input w-full text-xs"
+              />
+            </div>
+
+            {/* Current Build URL */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Current Build URL</label>
+              <input
+                type="text"
+                value={rc2Url}
+                onChange={(e) => setRc2Url(e.target.value)}
+                placeholder="https://build-device.netradyne.info/view/.../job/SomeJob/456"
+                className="ds-input w-full text-xs"
+              />
+            </div>
+          </div>
+        )}
 
         {/* ── Generate button row ── */}
         <div className="flex justify-end gap-3 pt-1">

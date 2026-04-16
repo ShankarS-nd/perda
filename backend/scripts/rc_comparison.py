@@ -133,6 +133,47 @@ SCRIPT_ARGS = [
 ]
 
 # =====================================================================
+# JENKINS URL PARSING
+# =====================================================================
+
+
+def parse_jenkins_url(url: str) -> tuple[str, str]:
+    """Parse a full Jenkins build URL into (job_base_url, build_number).
+
+    Accepts URLs like:
+      https://build-device.netradyne.info/view/.../job/SomeJob/123/
+      https://build-device.netradyne.info/job/SomeJob/123
+
+    Returns:
+      ("https://build-device.netradyne.info/view/.../job/SomeJob", "123")
+    """
+    url = url.strip().rstrip("/")
+    m = re.match(r"(https?://.+/job/[^/]+)/(\d+)$", url)
+    if not m:
+        raise ValueError(
+            f"Cannot parse Jenkins URL: {url!r}. "
+            f"Expected format: https://<host>/...job/<job_name>/<build_number>"
+        )
+    return m.group(1), m.group(2)
+
+
+def _url_cache_key(job_base_url: str, build_number: str) -> str:
+    """Derive a short, filesystem-safe cache key from a job URL + build number.
+
+    For the default job, returns just the build number (backward compatible).
+    For other jobs, returns '<job_name>_<build_number>'.
+    """
+    if job_base_url.rstrip("/") == JENKINS_BASE_URL.rstrip("/"):
+        return build_number
+    # Extract job name from the URL
+    m = re.search(r"/job/([^/]+)$", job_base_url.rstrip("/"))
+    job_name = m.group(1) if m else "custom"
+    # Sanitize job name for filesystem
+    safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", job_name)
+    return f"{safe_name}_{build_number}"
+
+
+# =====================================================================
 # JENKINS FETCH
 # =====================================================================
 
@@ -294,6 +335,108 @@ def fetch_report_js(
     return js
 
 
+def fetch_report_js_from_url(
+    jenkins_url: str,
+    session: requests.Session,
+    use_cache: bool = True,
+) -> tuple[str, str, str]:
+    """Fetch DAST report scr.js from an arbitrary Jenkins build URL.
+
+    Parameters:
+        jenkins_url: Full Jenkins build URL, e.g.
+            https://build-device.netradyne.info/view/.../job/SomeJob/123/
+        session: Authenticated requests session.
+        use_cache: Whether to check local cache first.
+
+    Returns:
+        (js_content, job_base_url, build_number)
+    """
+    job_base_url, build_number = parse_jenkins_url(jenkins_url)
+    cache_key = _url_cache_key(job_base_url, build_number)
+    cache_file = SCRJS_CACHE_DIR / f"{cache_key}.js"
+
+    if use_cache and cache_file.is_file():
+        print(f"  ✓ Using cached scr.js for {cache_key} ({cache_file.stat().st_size:,} bytes)")
+        return cache_file.read_text(encoding="utf-8"), job_base_url, build_number
+
+    # Try published scr.js
+    pub_url = f"{job_base_url}/{build_number}/Test_5freport/static/scr.js"
+    print(f"  ↓ Trying published report data: {pub_url}")
+    js: str | None = None
+    try:
+        resp = session.get(pub_url, timeout=180, allow_redirects=False)
+        if _is_auth_redirect(resp):
+            sys.exit(
+                "❌ Jenkins authentication failed (redirect to login). "
+                "Your JENKINS_TOKEN has likely expired."
+            )
+        _check_auth(resp)
+        if resp.status_code == 200:
+            print(f"    ✓ Downloaded ({len(resp.content):,} bytes)")
+            js = resp.text
+        elif resp.status_code in (301, 302, 303, 307, 308):
+            resp2 = session.get(resp.headers.get("Location", pub_url), timeout=180)
+            _check_auth(resp2)
+            if resp2.status_code == 200:
+                js = resp2.text
+    except requests.exceptions.TooManyRedirects:
+        pass
+
+    # Fall back to artifact
+    if js is None:
+        art_url = f"{job_base_url}/{build_number}/artifact/report/report.tar.gz"
+        print(f"  ↓ Trying artifact: {art_url}")
+        try:
+            resp = session.get(art_url, timeout=300, stream=True, allow_redirects=False)
+            if _is_auth_redirect(resp):
+                sys.exit("❌ Jenkins auth failed (redirect to login).")
+            _check_auth(resp)
+            if resp.status_code in (301, 302, 303, 307, 308):
+                resp = session.get(resp.headers.get("Location", art_url), timeout=300, stream=True)
+                _check_auth(resp)
+            if resp.status_code == 404:
+                raise RuntimeError(
+                    f"Build at {jenkins_url}: Neither published report nor "
+                    f"artifact report.tar.gz found."
+                )
+            resp.raise_for_status()
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tar_path = os.path.join(tmpdir, "report.tar.gz")
+                with open(tar_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        f.write(chunk)
+                with tarfile.open(tar_path, "r:gz") as tar:
+                    tar.extractall(tmpdir, filter="data")
+                scr_js_path = None
+                for root, _dirs, files in os.walk(tmpdir):
+                    for fname in files:
+                        if fname == "scr.js":
+                            scr_js_path = os.path.join(root, fname)
+                            break
+                    if scr_js_path:
+                        break
+                if not scr_js_path:
+                    raise RuntimeError(
+                        f"Build at {jenkins_url}: report.tar.gz downloaded but "
+                        f"no static/scr.js found inside."
+                    )
+                with open(scr_js_path, "r", encoding="utf-8", errors="replace") as f:
+                    js = f.read()
+        except requests.exceptions.TooManyRedirects:
+            raise RuntimeError(
+                f"Build at {jenkins_url}: Jenkins redirect loop. "
+                f"The build may not exist or the test report was never generated."
+            )
+
+    # Persist to cache
+    SCRJS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(js, encoding="utf-8")
+    print(f"  💾 Saved scr.js to cache: {cache_file}")
+
+    return js, job_base_url, build_number
+
+
 def fetch_dast_known_unknown_counts(
     build_number: str,
     session: requests.Session,
@@ -333,6 +476,44 @@ def fetch_dast_known_unknown_counts(
                     unknown = int(m.group(1))
                 else:
                     # First number in the header area is usually the count
+                    nums = re.findall(r">(\d+)<", text[:2000])
+                    if nums:
+                        unknown = int(nums[0])
+        except Exception:
+            pass
+
+    return known, unknown
+
+
+def fetch_dast_counts_from_url(
+    job_base_url: str,
+    build_number: str,
+    session: requests.Session,
+) -> tuple[int | None, int | None]:
+    """Like fetch_dast_known_unknown_counts but with a custom job base URL."""
+    known: int | None = None
+    unknown: int | None = None
+
+    for page, label in [("linked_issues.html", "known"), ("unknown_issue.html", "unknown")]:
+        url = f"{job_base_url}/{build_number}/Test_5freport/{page}"
+        try:
+            resp = session.get(url, timeout=30, allow_redirects=False)
+            if _is_auth_redirect(resp):
+                continue
+            if resp.status_code != 200 or len(resp.content) < 100:
+                continue
+            text = resp.text[:5000]
+            if label == "known":
+                m = re.search(r"Total Failed Test Cases with Linked Issues.*?(\d+)", text, re.DOTALL)
+                if not m:
+                    m = re.search(r"Known Issues Count:\s*(\d+)", text)
+                if m:
+                    known = int(m.group(1))
+            else:
+                m = re.search(r"Total Failed Test Cases(?!.*Linked).*?(\d+)", text, re.DOTALL)
+                if m:
+                    unknown = int(m.group(1))
+                else:
                     nums = re.findall(r">(\d+)<", text[:2000])
                     if nums:
                         unknown = int(nums[0])

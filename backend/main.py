@@ -470,8 +470,10 @@ async def execute_workflow(payload: WorkflowRunRequest):
 # ---------------------------------------------------------------------------
 
 class TestReportRequest(BaseModel):
-    rc1: str
-    rc2: str
+    rc1: str = ""
+    rc2: str = ""
+    rc1_url: str = ""
+    rc2_url: str = ""
     platform: str = "K1_US"
     force_refresh: bool = False
 
@@ -480,6 +482,8 @@ class TestReportRequest(BaseModel):
 async def test_report_summary(payload: TestReportRequest):
     """Return structured dashboard data comparing two Jenkins builds.
 
+    Accepts either build numbers (rc1/rc2) or direct Jenkins URLs (rc1_url/rc2_url).
+    URLs take priority over build numbers when both are provided.
     Reuses parsing logic from scripts/rc_comparison.py.
     """
     # Import at call-time to avoid circular / heavy init on startup
@@ -489,7 +493,11 @@ async def test_report_summary(payload: TestReportRequest):
         SERIAL_LOOKUP,
         _jenkins_session,
         fetch_report_js,
+        fetch_report_js_from_url,
         fetch_dast_known_unknown_counts,
+        fetch_dast_counts_from_url,
+        parse_jenkins_url,
+        _url_cache_key,
         parse_report_data,
         aggregate_results,
         extract_tc_id,
@@ -504,15 +512,45 @@ async def test_report_summary(payload: TestReportRequest):
             detail=f"Unknown platform '{platform}'. Valid: {', '.join(PLATFORMS)}",
         )
 
-    session = _jenkins_session()
+    # Determine whether we're using URLs or build numbers for each slot
+    use_url_rc1 = bool(payload.rc1_url.strip())
+    use_url_rc2 = bool(payload.rc2_url.strip())
+    has_rc1 = use_url_rc1 or bool(payload.rc1.strip())
+    has_rc2 = use_url_rc2 or bool(payload.rc2.strip())
 
+    if not has_rc1 or not has_rc2:
+        raise HTTPException(
+            status_code=400,
+            detail="Both builds are required. Provide build numbers (rc1/rc2) or direct URLs (rc1_url/rc2_url).",
+        )
+
+    session = _jenkins_session()
     use_cache_rc2 = not payload.force_refresh
 
+    # Track job base URLs for DAST count fetching
+    rc2_job_base: str | None = None
+    # Labels used for display and cache keys
+    rc1_label = payload.rc1.strip()
+    rc2_label = payload.rc2.strip()
+
     try:
-        # rc1 (previous/preset build) — always served from disk cache
-        rc1_js = fetch_report_js(payload.rc1.strip(), session, use_cache=True)
-        # rc2 (current build) — served from cache unless force_refresh=True
-        rc2_js = fetch_report_js(payload.rc2.strip(), session, use_cache=use_cache_rc2)
+        # ── Fetch rc1 ──
+        if use_url_rc1:
+            rc1_js, rc1_job_base, rc1_build = fetch_report_js_from_url(
+                payload.rc1_url.strip(), session, use_cache=True,
+            )
+            rc1_label = rc1_label or rc1_build
+        else:
+            rc1_js = fetch_report_js(rc1_label, session, use_cache=True)
+
+        # ── Fetch rc2 ──
+        if use_url_rc2:
+            rc2_js, rc2_job_base, rc2_build = fetch_report_js_from_url(
+                payload.rc2_url.strip(), session, use_cache=use_cache_rc2,
+            )
+            rc2_label = rc2_label or rc2_build
+        else:
+            rc2_js = fetch_report_js(rc2_label, session, use_cache=use_cache_rc2)
     except (SystemExit, Exception) as exc:
         if _is_jenkins_auth_error(str(exc)):
             logger.info("Jenkins auth failure in test-report-summary — refreshing token and retrying…")
@@ -520,8 +558,20 @@ async def test_report_summary(payload: TestReportRequest):
             if refresh["ok"]:
                 session = _jenkins_session()
                 try:
-                    rc1_js = fetch_report_js(payload.rc1.strip(), session, use_cache=True)
-                    rc2_js = fetch_report_js(payload.rc2.strip(), session, use_cache=use_cache_rc2)
+                    if use_url_rc1:
+                        rc1_js, _, rc1_build = fetch_report_js_from_url(
+                            payload.rc1_url.strip(), session, use_cache=True,
+                        )
+                        rc1_label = rc1_label or rc1_build
+                    else:
+                        rc1_js = fetch_report_js(rc1_label, session, use_cache=True)
+                    if use_url_rc2:
+                        rc2_js, rc2_job_base, rc2_build = fetch_report_js_from_url(
+                            payload.rc2_url.strip(), session, use_cache=use_cache_rc2,
+                        )
+                        rc2_label = rc2_label or rc2_build
+                    else:
+                        rc2_js = fetch_report_js(rc2_label, session, use_cache=use_cache_rc2)
                 except (SystemExit, Exception) as exc2:
                     raise HTTPException(status_code=500, detail=str(exc2))
             else:
@@ -576,7 +626,12 @@ async def test_report_summary(payload: TestReportRequest):
     # unknown_issue.html.  When available they override our derived counts.
     # Cache results to a JSON file to avoid hitting Jenkins repeatedly.
     dast_cache_dir = Path(__file__).resolve().parent / "cache" / "dast_counts"
-    dast_cache_file = dast_cache_dir / f"{payload.rc2.strip()}.json"
+    # Use URL-aware cache key for DAST counts
+    if use_url_rc2:
+        dast_cache_key = _url_cache_key(rc2_job_base, rc2_label)
+    else:
+        dast_cache_key = rc2_label
+    dast_cache_file = dast_cache_dir / f"{dast_cache_key}.json"
     dast_known: int | None = None
     dast_unknown: int | None = None
 
@@ -589,9 +644,14 @@ async def test_report_summary(payload: TestReportRequest):
             pass
     else:
         try:
-            dast_known, dast_unknown = fetch_dast_known_unknown_counts(
-                payload.rc2.strip(), session,
-            )
+            if use_url_rc2 and rc2_job_base:
+                dast_known, dast_unknown = fetch_dast_counts_from_url(
+                    rc2_job_base, rc2_label, session,
+                )
+            else:
+                dast_known, dast_unknown = fetch_dast_known_unknown_counts(
+                    rc2_label, session,
+                )
         except (SystemExit, Exception):
             dast_known, dast_unknown = None, None
         # Persist to cache
@@ -812,8 +872,8 @@ async def test_report_summary(payload: TestReportRequest):
 
     return {
         "platform": platform,
-        "rc1": payload.rc1.strip(),
-        "rc2": payload.rc2.strip(),
+        "rc1": rc1_label,
+        "rc2": rc2_label,
         "rc1_ota": rc1_ota,
         "rc2_ota": rc2_ota,
         "rc1_overview": {
