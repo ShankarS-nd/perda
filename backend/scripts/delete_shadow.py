@@ -2,14 +2,12 @@
 """
 Delete IoT Device Shadows
 ==========================
-Deletes AWS IoT classic and named shadows for a list of device IDs.
+Deletes the Classic Shadow and priority-shadow-vod named shadow
+for a list of device IDs.
 
-Supports:
-  - Custom AWS profile selection
-  - Configurable region
-  - Optional "staging-" prefix on device IDs
-  - Configurable named shadow name
-  - Comma-separated or newline-separated device ID input
+Always deletes BOTH:
+  1. Classic Shadow (the default/unnamed shadow)
+  2. priority-shadow-vod (named shadow)
 
 Authentication:
   Requires a valid AWS SSO profile configured locally.
@@ -32,41 +30,27 @@ SCRIPT_ARGS = [
     {
         "name": "profile_name",
         "type": "string",
-        "description": "AWS CLI profile name (e.g., 'ganesh', 'default')",
+        "description": "Your AWS SSO profile name configured in ~/.aws/config (e.g. 'ganesh')",
         "default": "ganesh",
         "required": True,
     },
     {
         "name": "region",
         "type": "string",
-        "description": "AWS region for IoT (e.g., us-west-2, us-east-1)",
+        "description": "AWS region where the IoT devices are registered (e.g. 'us-west-2')",
         "default": "us-west-2",
         "required": True,
     },
     {
         "name": "device_ids",
         "type": "string",
-        "description": "Comma-separated device IDs (e.g., '3633042251,6603083402,264130505')",
+        "description": "Device serial numbers separated by commas, OR a group name: B2_US, K2_US, K1_US, B3_US, B3_IN, K2_IN, K1_UK, ALL",
         "required": True,
-    },
-    {
-        "name": "shadow_name",
-        "type": "string",
-        "description": "Named shadow to delete (leave empty to skip named shadow deletion)",
-        "default": "priority-shadow-vod",
-        "required": False,
     },
     {
         "name": "add_staging_prefix",
         "type": "bool",
-        "description": "Prepend 'staging-' to each device ID before deletion",
-        "default": "true",
-        "required": False,
-    },
-    {
-        "name": "delete_classic",
-        "type": "bool",
-        "description": "Delete the classic (unnamed) shadow for each device",
+        "description": "If true, adds 'staging-' before each device ID (required for staging environment devices)",
         "default": "true",
         "required": False,
     },
@@ -117,18 +101,17 @@ def delete_shadows(
     profile_name: str,
     region: str,
     device_ids: list[str],
-    shadow_name: str = "priority-shadow-vod",
     add_staging_prefix: bool = True,
-    delete_classic: bool = True,
 ):
-    """Delete classic and/or named shadows for the given device IDs."""
+    """Delete Classic Shadow and priority-shadow-vod for the given device IDs."""
+
+    SHADOW_NAME = "priority-shadow-vod"
 
     print(f"🔧 AWS Profile: {profile_name}")
     print(f"🌍 Region: {region}")
     print(f"📦 Devices: {len(device_ids)}")
     print(f"🏷️  Staging prefix: {'Yes' if add_staging_prefix else 'No'}")
-    print(f"🗑️  Delete classic shadow: {'Yes' if delete_classic else 'No'}")
-    print(f"🗑️  Delete named shadow: {shadow_name if shadow_name else 'No'}")
+    print(f"🗑️  Shadows to delete: Classic Shadow, {SHADOW_NAME}")
     print("=" * 60)
 
     try:
@@ -153,44 +136,40 @@ def delete_shadows(
     for thing_name in thing_names:
         print(f"\n🗑️  Deleting shadows for: {thing_name}")
 
-        # Delete Classic Shadow
-        if delete_classic:
-            try:
-                client.delete_thing_shadow(thingName=thing_name)
-                print(f"  ✔ Classic shadow deleted")
-                results["classic_deleted"] += 1
-            except client.exceptions.ResourceNotFoundException:
-                print(f"  ⚠ Classic shadow not found (already clean)")
-                results["classic_failed"] += 1
-            except Exception as e:
-                print(f"  ❌ Classic shadow delete failed: {str(e)}")
-                results["classic_failed"] += 1
+        # 1. Delete Classic Shadow
+        try:
+            client.delete_thing_shadow(thingName=thing_name)
+            print(f"  ✔ Classic Shadow deleted")
+            results["classic_deleted"] += 1
+        except client.exceptions.ResourceNotFoundException:
+            print(f"  ⚠ Classic Shadow not found (already clean)")
+            results["classic_failed"] += 1
+        except Exception as e:
+            print(f"  ❌ Classic Shadow delete failed: {str(e)}")
+            results["classic_failed"] += 1
 
-        # Delete Named Shadow
-        if shadow_name:
-            try:
-                client.delete_thing_shadow(
-                    thingName=thing_name,
-                    shadowName=shadow_name,
-                )
-                print(f"  ✔ Named shadow '{shadow_name}' deleted")
-                results["named_deleted"] += 1
-            except client.exceptions.ResourceNotFoundException:
-                print(f"  ⚠ Named shadow '{shadow_name}' not found (already clean)")
-                results["named_failed"] += 1
-            except Exception as e:
-                print(f"  ❌ Named shadow '{shadow_name}' delete failed: {str(e)}")
-                results["named_failed"] += 1
+        # 2. Delete priority-shadow-vod
+        try:
+            client.delete_thing_shadow(
+                thingName=thing_name,
+                shadowName=SHADOW_NAME,
+            )
+            print(f"  ✔ {SHADOW_NAME} deleted")
+            results["named_deleted"] += 1
+        except client.exceptions.ResourceNotFoundException:
+            print(f"  ⚠ {SHADOW_NAME} not found (already clean)")
+            results["named_failed"] += 1
+        except Exception as e:
+            print(f"  ❌ {SHADOW_NAME} delete failed: {str(e)}")
+            results["named_failed"] += 1
 
     # Summary
     print("\n" + "=" * 60)
     print("📊 SUMMARY")
     print("=" * 60)
     print(f"  Total devices processed: {results['total']}")
-    if delete_classic:
-        print(f"  Classic shadows deleted: {results['classic_deleted']}/{results['total']}")
-    if shadow_name:
-        print(f"  Named shadows deleted:   {results['named_deleted']}/{results['total']}")
+    print(f"  Classic Shadow deleted:      {results['classic_deleted']}/{results['total']}")
+    print(f"  priority-shadow-vod deleted: {results['named_deleted']}/{results['total']}")
 
     failed = results["classic_failed"] + results["named_failed"]
     if failed == 0:
@@ -208,25 +187,20 @@ def delete_shadows(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Delete AWS IoT device shadows")
+    parser = argparse.ArgumentParser(description="Delete Classic Shadow and priority-shadow-vod from IoT devices")
     parser.add_argument("--profile_name", type=str, default="ganesh",
-                        help="AWS CLI profile name")
+                        help="AWS SSO profile name from ~/.aws/config")
     parser.add_argument("--region", type=str, default="us-west-2",
-                        help="AWS region")
+                        help="AWS region where devices are registered")
     parser.add_argument("--device_ids", type=str, required=True,
-                        help="Comma-separated device IDs or preset group name (B2_US, K2_US, K1_US, B3_US, B3_IN, K2_IN, K1_UK, ALL)")
-    parser.add_argument("--shadow_name", type=str, default="priority-shadow-vod",
-                        help="Named shadow to delete (empty to skip)")
+                        help="Comma-separated device serial numbers, or a group name: B2_US, K2_US, K1_US, B3_US, B3_IN, K2_IN, K1_UK, ALL")
     parser.add_argument("--add_staging_prefix", type=str, default="true",
-                        help="Prepend 'staging-' to device IDs (true/false)")
-    parser.add_argument("--delete_classic", type=str, default="true",
-                        help="Delete classic shadow (true/false)")
+                        help="Add 'staging-' prefix to device IDs (true/false)")
 
     args = parser.parse_args()
 
-    # Parse boolean args
+    # Parse boolean
     staging = args.add_staging_prefix.lower() in ("true", "1", "yes")
-    classic = args.delete_classic.lower() in ("true", "1", "yes")
 
     # Parse device list
     devices = parse_device_ids(args.device_ids)
@@ -237,13 +211,12 @@ if __name__ == "__main__":
 
     print(f"\n{'='*60}")
     print("  AWS IoT Shadow Deletion Tool")
+    print("  Deletes: Classic Shadow + priority-shadow-vod")
     print(f"{'='*60}\n")
 
     delete_shadows(
         profile_name=args.profile_name,
         region=args.region,
         device_ids=devices,
-        shadow_name=args.shadow_name,
         add_staging_prefix=staging,
-        delete_classic=classic,
     )
