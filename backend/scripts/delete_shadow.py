@@ -47,13 +47,6 @@ SCRIPT_ARGS = [
         "description": "Device serial numbers separated by commas, OR a group name: B2_US, K2_US, K1_US, B3_US, B3_IN, K2_IN, K1_UK, ALL",
         "required": True,
     },
-    {
-        "name": "add_staging_prefix",
-        "type": "bool",
-        "description": "If true, adds 'staging-' before each device ID (required for staging environment devices)",
-        "default": "true",
-        "required": False,
-    },
 ]
 
 # =====================================================================
@@ -101,16 +94,15 @@ def delete_shadows(
     profile_name: str,
     region: str,
     device_ids: list[str],
-    add_staging_prefix: bool = True,
 ):
-    """Delete Classic Shadow and priority-shadow-vod for the given device IDs."""
+    """Delete Classic Shadow and priority-shadow-vod for the given device IDs (staging)."""
 
     SHADOW_NAME = "priority-shadow-vod"
 
     print(f"🔧 AWS Profile: {profile_name}")
     print(f"🌍 Region: {region}")
     print(f"📦 Devices: {len(device_ids)}")
-    print(f"🏷️  Staging prefix: {'Yes' if add_staging_prefix else 'No'}")
+    print(f"🏷️  Environment: Staging (staging- prefix applied)")
     print(f"🗑️  Shadows to delete: Classic Shadow, {SHADOW_NAME}")
     print("=" * 60)
 
@@ -121,8 +113,8 @@ def delete_shadows(
         print(f"\n❌ Failed to create AWS session: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Apply prefix
-    thing_names = [f"staging-{d}" for d in device_ids] if add_staging_prefix else device_ids
+    # Always staging
+    thing_names = [f"staging-{d}" for d in device_ids]
 
     # Track results
     results = {
@@ -194,13 +186,8 @@ if __name__ == "__main__":
                         help="AWS region where devices are registered")
     parser.add_argument("--device_ids", type=str, required=True,
                         help="Comma-separated device serial numbers, or a group name: B2_US, K2_US, K1_US, B3_US, B3_IN, K2_IN, K1_UK, ALL")
-    parser.add_argument("--add_staging_prefix", type=str, default="true",
-                        help="Add 'staging-' prefix to device IDs (true/false)")
 
     args = parser.parse_args()
-
-    # Parse boolean
-    staging = args.add_staging_prefix.lower() in ("true", "1", "yes")
 
     # Parse device list
     devices = parse_device_ids(args.device_ids)
@@ -218,5 +205,4 @@ if __name__ == "__main__":
         profile_name=args.profile_name,
         region=args.region,
         device_ids=devices,
-        add_staging_prefix=staging,
     )
