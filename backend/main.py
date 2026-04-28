@@ -1550,6 +1550,19 @@ async def device_log_download(payload: DeviceLogDownloadRequest):
                 yield f"data: {json.dumps({'type': 'stdout', 'text': 'ERROR: AWS profile s3view not configured. Run: aws configure --profile s3view'})}\n\n"
                 yield f"data: {json.dumps({'type': 'exit', 'code': 1})}\n\n"
                 return
+            # Pre-flight: verify SSO token is valid before starting the download.
+            try:
+                token_chk = _subprocess.run(
+                    [aws_bin, "sts", "get-caller-identity", "--profile", "s3view"],
+                    capture_output=True, text=True, timeout=10, env=env,
+                )
+                if token_chk.returncode != 0:
+                    err_text = (token_chk.stderr or token_chk.stdout).strip()
+                    yield f"data: {json.dumps({'type': 'stdout', 'text': f'ERROR: AWS SSO token for profile s3view is expired or invalid. Run the aws-sso-refresh script and try again. ({err_text})'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'exit', 'code': 1})}\n\n"
+                    return
+            except Exception as token_err:
+                yield f"data: {json.dumps({'type': 'stdout', 'text': f'WARNING: Could not verify SSO token ({token_err}). Attempting download anyway.'})}\n\n"
             proc = _subprocess.Popen(
                 [_sys.executable, str(script_path), payload.device_id, payload.date],
                 stdout=_subprocess.PIPE,
