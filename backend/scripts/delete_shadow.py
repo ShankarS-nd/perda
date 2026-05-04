@@ -10,30 +10,52 @@ Always deletes BOTH:
   2. priority-shadow-vod (named shadow)
 
 Authentication:
-  Requires a valid AWS SSO profile configured locally.
+  Uses the default AWS credentials available on the server
+  (instance profile, environment variables, or ~/.aws/credentials).
+  No SSO profile is required.
 """
 
 import sys
 import json
+import subprocess
 
 try:
     import boto3
+    from botocore.exceptions import NoCredentialsError, ClientError
 except ImportError:
     print("ERROR: boto3 is not installed. Run: pip install boto3", file=sys.stderr)
     sys.exit(1)
+
+
+def ensure_aws_credentials() -> bool:
+    """
+    Check if valid AWS credentials are available (default credential chain).
+    Returns True if credentials are valid, False otherwise.
+    """
+    print("🔑 Checking AWS credentials...")
+    try:
+        session = boto3.Session()
+        sts = session.client("sts")
+        identity = sts.get_caller_identity()
+        print(f"  ✔ Credentials valid (Account: {identity['Account']})")
+        return True
+    except NoCredentialsError:
+        print("  ⚠ No AWS credentials found.")
+        print("    Ensure credentials are configured via environment variables,")
+        print("    ~/.aws/credentials, or an instance profile.")
+        return False
+    except ClientError as e:
+        print(f"  ⚠ AWS credential check failed: {e}")
+        return False
+    except Exception as e:
+        print(f"  ⚠ Unexpected error checking credentials: {e}")
+        return False
 
 # =====================================================================
 # SCRIPT METADATA — consumed by Perda script runner
 # =====================================================================
 
 SCRIPT_ARGS = [
-    {
-        "name": "profile_name",
-        "type": "string",
-        "description": "Your AWS SSO profile name configured in ~/.aws/config (e.g. 'ganesh')",
-        "default": "ganesh",
-        "required": True,
-    },
     {
         "name": "region",
         "type": "string",
@@ -91,7 +113,6 @@ def parse_device_ids(raw: str) -> list[str]:
 
 
 def delete_shadows(
-    profile_name: str,
     region: str,
     device_ids: list[str],
 ):
@@ -99,15 +120,19 @@ def delete_shadows(
 
     SHADOW_NAME = "priority-shadow-vod"
 
-    print(f"🔧 AWS Profile: {profile_name}")
     print(f"🌍 Region: {region}")
     print(f"📦 Devices: {len(device_ids)}")
     print(f"🏷️  Environment: Staging (staging- prefix applied)")
     print(f"🗑️  Shadows to delete: Classic Shadow, {SHADOW_NAME}")
     print("=" * 60)
 
+    # Verify AWS credentials are available
+    if not ensure_aws_credentials():
+        print("\n❌ Cannot proceed without valid AWS credentials.", file=sys.stderr)
+        sys.exit(1)
+
     try:
-        session = boto3.Session(profile_name=profile_name)
+        session = boto3.Session()
         client = session.client('iot-data', region_name=region)
     except Exception as e:
         print(f"\n❌ Failed to create AWS session: {e}", file=sys.stderr)
@@ -180,8 +205,6 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Delete Classic Shadow and priority-shadow-vod from IoT devices")
-    parser.add_argument("--profile_name", type=str, default="ganesh",
-                        help="AWS SSO profile name from ~/.aws/config")
     parser.add_argument("--region", type=str, default="us-west-2",
                         help="AWS region where devices are registered")
     parser.add_argument("--device_ids", type=str, required=True,
@@ -202,7 +225,6 @@ if __name__ == "__main__":
     print(f"{'='*60}\n")
 
     delete_shadows(
-        profile_name=args.profile_name,
         region=args.region,
         device_ids=devices,
     )
