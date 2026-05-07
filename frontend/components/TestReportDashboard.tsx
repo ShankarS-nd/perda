@@ -112,6 +112,31 @@ interface DiffTCs {
   by_service: Record<string, DiffTCEntry[]>;
 }
 
+interface StableTCEntry {
+  tc_id: string;
+  name: string;
+  error?: string;
+  linked?: string;
+}
+
+interface StableTCs {
+  count: number;
+  by_service: Record<string, StableTCEntry[]>;
+}
+
+interface FixedTCEntry {
+  tc_id: string;
+  name: string;
+  old_error?: string;
+  error?: string;
+  linked?: string;
+}
+
+interface FixedTCs {
+  count: number;
+  by_service: Record<string, FixedTCEntry[]>;
+}
+
 interface DashboardData {
   platform: string;
   rc1: string;
@@ -131,6 +156,8 @@ interface DashboardData {
   regressions: Regressions;
   persistent_failures: Regressions;
   regression_confidence: RegressionConfidence;
+  stable_tcs?: StableTCs;
+  fixed_tcs?: FixedTCs;
   new_tcs?: DiffTCs;
   removed_tcs?: DiffTCs;
   graphs: {
@@ -153,13 +180,13 @@ interface Preset {
 }
 
 const PRESETS: Preset[] = [
-  { label: "5.6.13.rc.2 --> B3 US", rc1: "857",  platform: "B3_US" },
-  { label: "5.6.13.rc.2 --> K1 US", rc1: "865",  platform: "K1_US" },
-  { label: "5.6.13.rc.2 --> B2 US", rc1: "871",  platform: "B2_US" },
-  { label: "5.6.13.rc.2 --> K2 US", rc1: "864",  platform: "K2_US" },
-  { label: "5.6.13.rc.2 --> K2 IN", rc1: "870",  platform: "K2_IN" },
-  { label: "5.6.13.rc.2 --> K1 UK", rc1: "873",  platform: "K1_UK" },
-  { label: "5.6.13.rc.2 --> B3 IN", rc1: "872",  platform: "B3_IN" },
+  { label: "5.6.13.rc.2 --> B3 US", rc1: "857", platform: "B3_US" },
+  { label: "5.6.13.rc.2 --> K1 US", rc1: "865", platform: "K1_US" },
+  { label: "5.6.13.rc.2 --> B2 US", rc1: "871", platform: "B2_US" },
+  { label: "5.6.13.rc.2 --> K2 US", rc1: "864", platform: "K2_US" },
+  { label: "5.6.13.rc.2 --> K2 IN", rc1: "870", platform: "K2_IN" },
+  { label: "5.6.13.rc.2 --> K1 UK", rc1: "873", platform: "K1_UK" },
+  { label: "5.6.13.rc.2 --> B3 IN", rc1: "872", platform: "B3_IN" },
 ];
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
@@ -210,14 +237,14 @@ export default function TestReportDashboard() {
     fetch(`${API_BASE}/preset-cache-status`)
       .then((r) => (r.ok ? r.json() : {}))
       .then((d: Record<string, CacheEntry>) => setCacheStatus(d))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const refreshCacheStatus = async () => {
     try {
       const r = await fetch(`${API_BASE}/preset-cache-status`);
       if (r.ok) setCacheStatus(await r.json());
-    } catch {}
+    } catch { }
   };
 
   const syncPresets = async () => {
@@ -331,6 +358,8 @@ export default function TestReportDashboard() {
       case "persist_unknown": return data.persistent_failures?.unknown_by_service ?? {};
       case "new_tcs": return data.new_tcs?.by_service ?? {};
       case "removed_tcs": return data.removed_tcs?.by_service ?? {};
+      case "stable_tcs": return data.stable_tcs?.by_service ?? {};
+      case "fixed_tcs": return data.fixed_tcs?.by_service ?? {};
       default: return {};
     }
   };
@@ -367,6 +396,152 @@ export default function TestReportDashboard() {
 
   const toggleService = (svc: string) => {
     setExpandedService(expandedService === svc ? null : svc);
+  };
+
+  // ── CSV Download ──
+  const downloadCSV = () => {
+    if (!data) return;
+
+    const rows: string[][] = [];
+    const addSeparator = () => rows.push([]);
+    const addSectionHeader = (title: string) => {
+      rows.push([`═══ ${title} ═══`]);
+      rows.push(["Service", "TC ID", "Test Case Name", "Result", "Error / Notes", "Linked Issue"]);
+    };
+
+    // Title
+    rows.push([`Test Report Summary — ${data.platform}`]);
+    rows.push([`Build #${data.rc2}${data.rc2_ota ? ` (${data.rc2_ota})` : ""} vs Build #${data.rc1}${data.rc1_ota ? ` (${data.rc1_ota})` : ""}`]);
+    rows.push([`Total Test Cases: ${data.overview.total}`]);
+    addSeparator();
+
+    // Overview
+    rows.push(["── Overview ──"]);
+    rows.push(["Metric", "Count", "Percentage"]);
+    rows.push(["Pass", String(data.overview.pass), `${data.overview.pass_pct}%`]);
+    rows.push(["Known Failures", String(data.overview.known_failures), `${data.overview.known_pct}%`]);
+    rows.push(["Unknown Failures", String(data.overview.unknown_failures), `${data.overview.unknown_pct}%`]);
+    rows.push(["Not Executed", String(data.overview.not_executed), `${data.overview.ne_pct}%`]);
+    addSeparator();
+
+    // Stable TCs
+    if (data.stable_tcs && data.stable_tcs.count > 0) {
+      addSectionHeader(`STABLE TEST CASES (Pass → Pass) — ${data.stable_tcs.count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.stable_tcs.by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, "PASS → PASS", "", tc.linked || ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // Regressions - Known
+    if (data.regressions.known_count > 0) {
+      addSectionHeader(`KNOWN REGRESSIONS (Pass → Fail) — ${data.regressions.known_count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.regressions.known_by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, "PASS → FAIL", tc.error || "", tc.linked || ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // Regressions - Unknown
+    if (data.regressions.unknown_count > 0) {
+      addSectionHeader(`UNKNOWN REGRESSIONS (Pass → Fail) — ${data.regressions.unknown_count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.regressions.unknown_by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, "PASS → FAIL", tc.error || "", ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // Fixed TCs
+    if (data.fixed_tcs && data.fixed_tcs.count > 0) {
+      addSectionHeader(`FIXED TEST CASES (Fail → Pass) — ${data.fixed_tcs.count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.fixed_tcs.by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, "FAIL → PASS", tc.old_error || "", tc.linked || ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // Persistent Failures - Known
+    if (data.persistent_failures && data.persistent_failures.known_count > 0) {
+      addSectionHeader(`KNOWN PERSISTENT FAILURES (Fail → Fail) — ${data.persistent_failures.known_count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.persistent_failures.known_by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, "FAIL → FAIL", tc.error || "", tc.linked || ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // Persistent Failures - Unknown
+    if (data.persistent_failures && data.persistent_failures.unknown_count > 0) {
+      addSectionHeader(`UNKNOWN PERSISTENT FAILURES (Fail → Fail) — ${data.persistent_failures.unknown_count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.persistent_failures.unknown_by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, "FAIL → FAIL", tc.error || "", ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // New TCs
+    if (data.new_tcs && data.new_tcs.count > 0) {
+      addSectionHeader(`NEW TEST CASES (Only in Build #${data.rc2}) — ${data.new_tcs.count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.new_tcs.by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, tc.result || "", tc.error || "", tc.linked || ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // Removed TCs
+    if (data.removed_tcs && data.removed_tcs.count > 0) {
+      addSectionHeader(`REMOVED TEST CASES (Only in Build #${data.rc1}) — ${data.removed_tcs.count} TCs`);
+      for (const [svc, tcs] of Object.entries(data.removed_tcs.by_service)) {
+        for (const tc of tcs) {
+          rows.push([svc, tc.tc_id, tc.name, tc.result || "", tc.error || "", tc.linked || ""]);
+        }
+      }
+      addSeparator();
+    }
+
+    // Summary footer
+    rows.push(["── Summary ──"]);
+    rows.push(["Category", "Count"]);
+    rows.push(["Stable (Pass → Pass)", String(data.stable_tcs?.count ?? 0)]);
+    rows.push(["Known Regressions", String(data.regressions.known_count)]);
+    rows.push(["Unknown Regressions", String(data.regressions.unknown_count)]);
+    rows.push(["Fixed (Fail → Pass)", String(data.fixed_tcs?.count ?? 0)]);
+    rows.push(["Known Persistent Failures", String(data.persistent_failures?.known_count ?? 0)]);
+    rows.push(["Unknown Persistent Failures", String(data.persistent_failures?.unknown_count ?? 0)]);
+    rows.push(["New Test Cases", String(data.new_tcs?.count ?? 0)]);
+    rows.push(["Removed Test Cases", String(data.removed_tcs?.count ?? 0)]);
+
+    // Convert to CSV
+    const csvContent = rows.map(row =>
+      row.map(cell => {
+        const escaped = cell.replace(/"/g, '""');
+        return cell.includes(",") || cell.includes('"') || cell.includes("\n") ? `"${escaped}"` : cell;
+      }).join(",")
+    ).join("\n");
+
+    // Download
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `test_report_${data.platform}_${data.rc1}_vs_${data.rc2}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // ── Render ──
@@ -408,11 +583,10 @@ export default function TestReportDashboard() {
               const cached = PRESETS.filter((p) => cacheStatus[p.rc1]?.cached).length;
               const total = PRESETS.length;
               return (
-                <span className={`text-[10px] px-2.5 py-1 rounded-full font-medium ${
-                  cached === total
+                <span className={`text-[10px] px-2.5 py-1 rounded-full font-medium ${cached === total
                     ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/10"
                     : "bg-amber-500/10 text-amber-400 border border-amber-500/10"
-                }`}>
+                  }`}>
                   {cached}/{total} cached
                 </span>
               );
@@ -631,13 +805,11 @@ export default function TestReportDashboard() {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
                   )}
-                  <span className={`w-48 shrink-0 ${
-                    entry.status === "cached" ? "text-gray-500" : "text-gray-300"
-                  }`}>{entry.label}</span>
-                  <span className={`truncate ${
-                    entry.status === "error" ? "text-red-400" :
-                    entry.status === "cached" ? "text-gray-600" : "text-gray-500"
-                  }`}>{entry.msg}</span>
+                  <span className={`w-48 shrink-0 ${entry.status === "cached" ? "text-gray-500" : "text-gray-300"
+                    }`}>{entry.label}</span>
+                  <span className={`truncate ${entry.status === "error" ? "text-red-400" :
+                      entry.status === "cached" ? "text-gray-600" : "text-gray-500"
+                    }`}>{entry.msg}</span>
                 </div>
               ))}
             </div>
@@ -683,6 +855,17 @@ export default function TestReportDashboard() {
             <span className="text-gray-500 text-xs">{data.platform}</span>
             <div className="h-4 w-px bg-gray-700/50 mx-1" />
             <span className="text-gray-500 text-xs">{data.overview.total} total test cases</span>
+            <div className="ml-auto">
+              <button
+                onClick={downloadCSV}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-300 text-xs font-medium transition-all duration-200 shadow-sm hover:shadow-emerald-500/10"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Download CSV Report
+              </button>
+            </div>
           </div>
 
           {/* ── SECTION 0: Previous Build Overview (compact) ── */}
@@ -731,16 +914,16 @@ export default function TestReportDashboard() {
               <ServiceDrillDown
                 title={
                   activeBox === "rc1_pass" ? "Passed Test Cases" :
-                  activeBox === "rc1_known" ? "Known Failures" :
-                  activeBox === "rc1_unknown" ? "Unknown Failures" : "Not Executed"
+                    activeBox === "rc1_known" ? "Known Failures" :
+                      activeBox === "rc1_unknown" ? "Unknown Failures" : "Not Executed"
                 }
                 services={getServiceData(activeBox)}
                 expandedService={expandedService}
                 toggleService={toggleService}
                 color={
                   activeBox === "rc1_pass" ? "emerald" :
-                  activeBox === "rc1_known" ? "amber" :
-                  activeBox === "rc1_unknown" ? "red" : "slate"
+                    activeBox === "rc1_known" ? "amber" :
+                      activeBox === "rc1_unknown" ? "red" : "slate"
                 }
               />
             )}
@@ -792,16 +975,16 @@ export default function TestReportDashboard() {
               <ServiceDrillDown
                 title={
                   activeBox === "pass" ? "Passed Test Cases" :
-                  activeBox === "known" ? "Known Failures" :
-                  activeBox === "unknown" ? "Unknown Failures" : "Not Executed"
+                    activeBox === "known" ? "Known Failures" :
+                      activeBox === "unknown" ? "Unknown Failures" : "Not Executed"
                 }
                 services={getServiceData(activeBox)}
                 expandedService={expandedService}
                 toggleService={toggleService}
                 color={
                   activeBox === "pass" ? "emerald" :
-                  activeBox === "known" ? "amber" :
-                  activeBox === "unknown" ? "red" : "slate"
+                    activeBox === "known" ? "amber" :
+                      activeBox === "unknown" ? "red" : "slate"
                 }
               />
             )}
@@ -942,6 +1125,66 @@ export default function TestReportDashboard() {
                   rc1={data.rc1}
                   rc2={data.rc2}
                   category={activeBox === "persist_known" ? "persist_known" : "persist_unknown"}
+                />
+              )}
+            </div>
+          )}
+
+          {/* ── SECTION 2C: Stable Test Cases (Pass → Pass) ── */}
+          {data.stable_tcs && data.stable_tcs.count > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                Stable Test Cases (Pass → Pass)
+              </h2>
+              <div className="grid grid-cols-1 gap-4">
+                <MetricBox
+                  label="Stable Test Cases"
+                  count={data.stable_tcs.count}
+                  pct={data.overview.total > 0 ? Math.round((data.stable_tcs.count / data.overview.total) * 100) : 0}
+                  color="emerald"
+                  active={activeBox === "stable_tcs"}
+                  onClick={() => handleBoxClick("stable_tcs")}
+                  subtitle="Passed in both builds"
+                />
+              </div>
+
+              {activeBox === "stable_tcs" && (
+                <ServiceDrillDown
+                  title="Stable Test Cases"
+                  services={getServiceData("stable_tcs")}
+                  expandedService={expandedService}
+                  toggleService={toggleService}
+                  color="emerald"
+                />
+              )}
+            </div>
+          )}
+
+          {/* ── SECTION 2D: Fixed Test Cases (Fail → Pass) ── */}
+          {data.fixed_tcs && data.fixed_tcs.count > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                Fixed Test Cases (Fail → Pass)
+              </h2>
+              <div className="grid grid-cols-1 gap-4">
+                <MetricBox
+                  label="Fixed Test Cases"
+                  count={data.fixed_tcs.count}
+                  pct={data.overview.total > 0 ? Math.round((data.fixed_tcs.count / data.overview.total) * 100) : 0}
+                  color="teal"
+                  active={activeBox === "fixed_tcs"}
+                  onClick={() => handleBoxClick("fixed_tcs")}
+                  subtitle="Failed previously, now passing"
+                />
+              </div>
+
+              {activeBox === "fixed_tcs" && (
+                <ServiceDrillDown
+                  title="Fixed Test Cases"
+                  services={getServiceData("fixed_tcs")}
+                  expandedService={expandedService}
+                  toggleService={toggleService}
+                  color="teal"
                 />
               )}
             </div>
@@ -1170,9 +1413,8 @@ function MetricBox({
   return (
     <button
       onClick={onClick}
-      className={`relative rounded-xl border ${c.border} ${c.bg} text-left transition-all duration-200 hover:scale-[1.015] hover:shadow-lg hover:shadow-black/10 cursor-pointer group ${
-        active ? `ring-2 ${c.ring} scale-[1.015]` : ""
-      }`}
+      className={`relative rounded-xl border ${c.border} ${c.bg} text-left transition-all duration-200 hover:scale-[1.015] hover:shadow-lg hover:shadow-black/10 cursor-pointer group ${active ? `ring-2 ${c.ring} scale-[1.015]` : ""
+        }`}
     >
       <div className={`flex ${hasBadges ? "items-stretch" : ""}`}>
         {/* Left side — main metric */}
@@ -1271,9 +1513,8 @@ function ServiceDrillDown({
                   {tcs.length} TCs
                 </span>
                 <svg
-                  className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 ${
-                    expandedService === svc ? "rotate-90" : ""
-                  }`}
+                  className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 ${expandedService === svc ? "rotate-90" : ""
+                    }`}
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -1282,9 +1523,8 @@ function ServiceDrillDown({
             </button>
             {/* Expanded TC list */}
             <div
-              className={`overflow-hidden transition-all duration-300 ease-in-out ${
-                expandedService === svc ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
-              }`}
+              className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedService === svc ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
+                }`}
             >
               <div className="bg-[#0a0c12] border-t border-white/[0.03]">
                 <table className="w-full text-xs">
@@ -1299,36 +1539,36 @@ function ServiceDrillDown({
                     {tcs.map((tc, i) => {
                       const isTimeout = tc.error ? /timeout/i.test(tc.error) : false;
                       return (
-                      <tr key={i} className={`hover:bg-white/[0.02] transition-colors ${isTimeout ? 'bg-yellow-500/[0.04]' : ''}`}>
-                        <td className={`px-4 py-2 font-mono ${c.text}`}>
-                          <div className="flex items-center gap-1.5">
-                            {tc.tc_id}
-                            {isTimeout && (
-                              <span className="inline-flex items-center bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[9px] font-semibold px-1.5 py-0.5 rounded" title="Timeout failure">
-                                ⏱ TIMEOUT
+                        <tr key={i} className={`hover:bg-white/[0.02] transition-colors ${isTimeout ? 'bg-yellow-500/[0.04]' : ''}`}>
+                          <td className={`px-4 py-2 font-mono ${c.text}`}>
+                            <div className="flex items-center gap-1.5">
+                              {tc.tc_id}
+                              {isTimeout && (
+                                <span className="inline-flex items-center bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[9px] font-semibold px-1.5 py-0.5 rounded" title="Timeout failure">
+                                  ⏱ TIMEOUT
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-gray-400 font-mono truncate max-w-[300px]" title={tc.name}>
+                            {tc.name.replace(".py", "").replace(/_/g, " ")}
+                          </td>
+                          <td className="px-4 py-2">
+                            {tc.linked && (
+                              <span className="text-amber-500/80 text-[10px] block truncate" title={tc.linked}>
+                                🔗 {tc.linked}
                               </span>
                             )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 text-gray-400 font-mono truncate max-w-[300px]" title={tc.name}>
-                          {tc.name.replace(".py", "").replace(/_/g, " ")}
-                        </td>
-                        <td className="px-4 py-2">
-                          {tc.linked && (
-                            <span className="text-amber-500/80 text-[10px] block truncate" title={tc.linked}>
-                              🔗 {tc.linked}
-                            </span>
-                          )}
-                          {tc.error && (
-                            <span className={`text-[10px] block truncate ${isTimeout ? 'text-yellow-400/80' : 'text-red-400/70'}`} title={tc.error}>
-                              {isTimeout ? '⏱' : '⚠'} {tc.error.length > 80 ? tc.error.slice(0, 80) + "…" : tc.error}
-                            </span>
-                          )}
-                          {!tc.linked && !tc.error && (
-                            <span className="text-gray-700">—</span>
-                          )}
-                        </td>
-                      </tr>
+                            {tc.error && (
+                              <span className={`text-[10px] block truncate ${isTimeout ? 'text-yellow-400/80' : 'text-red-400/70'}`} title={tc.error}>
+                                {isTimeout ? '⏱' : '⚠'} {tc.error.length > 80 ? tc.error.slice(0, 80) + "…" : tc.error}
+                              </span>
+                            )}
+                            {!tc.linked && !tc.error && (
+                              <span className="text-gray-700">—</span>
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -1486,11 +1726,10 @@ function RegressionDrillDown({
                     setExpandedConfBucket(isActive ? null : b.key);
                     setExpandedConfSvc(null);
                   }}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-150 ${
-                    isActive
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all duration-150 ${isActive
                       ? `${b.borderClass} ${b.bgClass} ${b.textClass} ring-1 ring-${b.color}-500/30`
                       : "border-white/[0.08] bg-white/[0.03] text-gray-400 hover:bg-white/[0.06]"
-                  }`}
+                    }`}
                 >
                   <span className={`text-sm font-bold ${isActive ? b.textClass : "text-gray-300"}`}>
                     {bucket.count}
@@ -1652,9 +1891,8 @@ function ServiceList({
                 {tcs.length} TCs
               </span>
               <svg
-                className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 ${
-                  expandedService === svc ? "rotate-90" : ""
-                }`}
+                className={`h-3.5 w-3.5 text-gray-600 transition-transform duration-200 ${expandedService === svc ? "rotate-90" : ""
+                  }`}
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
               >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -1663,9 +1901,8 @@ function ServiceList({
           </button>
           {/* Expanded TC list */}
           <div
-            className={`overflow-hidden transition-all duration-300 ease-in-out ${
-              expandedService === svc ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
-            }`}
+            className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedService === svc ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
+              }`}
           >
             <div className="bg-[#0a0c12] border-t border-white/[0.03]">
               <table className="w-full text-xs">

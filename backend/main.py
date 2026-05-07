@@ -769,6 +769,16 @@ async def test_report_summary(payload: TestReportRequest):
     persist_known = persistent[persistent["RC2_Linked"].apply(is_linked)].copy()
     persist_unknown = persistent[~persistent["RC2_Linked"].apply(is_linked)].copy()
 
+    # ── Stable test cases (Pass → Pass) ──
+    stable = merged[
+        (merged["RC1_Result"] == "PASS") & (merged["RC2_Result"] == "PASS")
+    ].copy()
+
+    # ── Fixed test cases (Fail → Pass) ──
+    fixed = merged[
+        (merged["RC1_Result"] == "FAIL") & (merged["RC2_Result"] == "PASS")
+    ].copy()
+
     reg_known = regressions[regressions["RC2_Linked"].apply(is_linked)].copy()
     reg_unknown = regressions[~regressions["RC2_Linked"].apply(is_linked)].copy()
 
@@ -781,6 +791,39 @@ async def test_report_summary(payload: TestReportRequest):
                 "name": row["Testcase Name"],
                 "error": str(row["RC2_Error"]) if str(row["RC2_Error"]).upper() not in ("NA", "NAN") else "",
                 "linked": str(row["RC2_Linked"]) if is_linked(row["RC2_Linked"]) else "",
+            }
+            result.setdefault(svc, []).append(entry)
+        for svc in result:
+            result[svc].sort(key=lambda x: x["tc_id"])
+        return dict(sorted(result.items()))
+
+    def _stable_tc_list(df: pd.DataFrame) -> dict:
+        """Group stable/fixed TCs by service (no error field needed for stable)."""
+        result: dict[str, list] = {}
+        for _, row in df.iterrows():
+            svc = row.get("Service", "OTHER")
+            entry = {
+                "tc_id": row["TC_ID"],
+                "name": row["Testcase Name"],
+                "linked": str(row["RC2_Linked"]) if is_linked(row.get("RC2_Linked", "")) else "",
+            }
+            result.setdefault(svc, []).append(entry)
+        for svc in result:
+            result[svc].sort(key=lambda x: x["tc_id"])
+        return dict(sorted(result.items()))
+
+    def _fixed_tc_list(df: pd.DataFrame) -> dict:
+        """Group fixed TCs by service (include the old error from RC1)."""
+        result: dict[str, list] = {}
+        for _, row in df.iterrows():
+            svc = row.get("Service", "OTHER")
+            old_err = str(row["RC1_Error"]) if str(row["RC1_Error"]).upper() not in ("NA", "NAN") else ""
+            entry = {
+                "tc_id": row["TC_ID"],
+                "name": row["Testcase Name"],
+                "old_error": old_err,
+                "error": f"Previously: {old_err}" if old_err else "",
+                "linked": str(row["RC1_Linked"]) if is_linked(row.get("RC1_Linked", "")) else "",
             }
             result.setdefault(svc, []).append(entry)
         for svc in result:
@@ -990,6 +1033,14 @@ async def test_report_summary(payload: TestReportRequest):
             "unknown_by_service": _reg_tc_list(persist_unknown),
         },
         "regression_confidence": reg_confidence,
+        "stable_tcs": {
+            "count": len(stable),
+            "by_service": _stable_tc_list(stable),
+        },
+        "fixed_tcs": {
+            "count": len(fixed),
+            "by_service": _fixed_tc_list(fixed),
+        },
         "new_tcs": {
             "count": len(new_tcs),
             "by_service": new_tcs_by_service,
