@@ -11,6 +11,8 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -398,150 +400,256 @@ export default function TestReportDashboard() {
     setExpandedService(expandedService === svc ? null : svc);
   };
 
-  // ── CSV Download ──
-  const downloadCSV = () => {
+  // ── Excel Download (multi-sheet, styled) ──
+  const downloadExcel = async () => {
     if (!data) return;
 
-    const rows: string[][] = [];
-    const addSeparator = () => rows.push([]);
-    const addSectionHeader = (title: string) => {
-      rows.push([`═══ ${title} ═══`]);
-      rows.push(["Service", "TC ID", "Test Case Name", "Result", "Error / Notes", "Linked Issue"]);
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "PERDA Test Report";
+    wb.created = new Date();
+
+    // ── Color palette ──
+    const COLORS = {
+      headerFill: "1F2937",    // dark charcoal
+      headerFont: "FFFFFF",    // white
+      emerald: "059669",       // stable
+      emeraldLight: "D1FAE5",
+      teal: "0D9488",          // fixed
+      tealLight: "CCFBF1",
+      orange: "D97706",        // known regression
+      orangeLight: "FEF3C7",
+      rose: "E11D48",          // unknown regression
+      roseLight: "FFE4E6",
+      amber: "B45309",         // known persistent
+      amberLight: "FEF3C7",
+      red: "DC2626",           // unknown persistent
+      redLight: "FEE2E2",
+      sky: "0284C7",           // new TCs
+      skyLight: "E0F2FE",
+      violet: "7C3AED",       // removed TCs
+      violetLight: "EDE9FE",
+      indigo: "4F46E5",       // overview
+      indigoLight: "E0E7FF",
     };
 
-    // Title
-    rows.push([`Test Report Summary — ${data.platform}`]);
-    rows.push([`Build #${data.rc2}${data.rc2_ota ? ` (${data.rc2_ota})` : ""} vs Build #${data.rc1}${data.rc1_ota ? ` (${data.rc1_ota})` : ""}`]);
-    rows.push([`Total Test Cases: ${data.overview.total}`]);
-    addSeparator();
+    // ── Shared styling helpers ──
+    const styleHeader = (row: ExcelJS.Row, fillColor: string) => {
+      row.height = 24;
+      row.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${fillColor}` } };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FF374151" } },
+          bottom: { style: "thin", color: { argb: "FF374151" } },
+          left: { style: "thin", color: { argb: "FF374151" } },
+          right: { style: "thin", color: { argb: "FF374151" } },
+        };
+      });
+    };
 
-    // Overview
-    rows.push(["── Overview ──"]);
-    rows.push(["Metric", "Count", "Percentage"]);
-    rows.push(["Pass", String(data.overview.pass), `${data.overview.pass_pct}%`]);
-    rows.push(["Known Failures", String(data.overview.known_failures), `${data.overview.known_pct}%`]);
-    rows.push(["Unknown Failures", String(data.overview.unknown_failures), `${data.overview.unknown_pct}%`]);
-    rows.push(["Not Executed", String(data.overview.not_executed), `${data.overview.ne_pct}%`]);
-    addSeparator();
+    const styleDataRow = (row: ExcelJS.Row, isAlt: boolean, accentLight?: string) => {
+      row.eachCell((cell) => {
+        cell.font = { size: 10, color: { argb: "FF1F2937" } };
+        cell.alignment = { vertical: "middle", wrapText: true };
+        cell.border = {
+          bottom: { style: "hair", color: { argb: "FFE5E7EB" } },
+          left: { style: "hair", color: { argb: "FFE5E7EB" } },
+          right: { style: "hair", color: { argb: "FFE5E7EB" } },
+        };
+        if (isAlt) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${accentLight || "F9FAFB"}` } };
+        }
+      });
+    };
 
-    // Stable TCs
+    const addTitleBlock = (ws: ExcelJS.Worksheet, sheetTitle: string, subtitle: string, color: string) => {
+      // Title row
+      const titleRow = ws.addRow([sheetTitle]);
+      ws.mergeCells(titleRow.number, 1, titleRow.number, 6);
+      titleRow.height = 30;
+      titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: `FF${color}` } };
+      titleRow.getCell(1).alignment = { vertical: "middle" };
+
+      // Subtitle row
+      const subRow = ws.addRow([subtitle]);
+      ws.mergeCells(subRow.number, 1, subRow.number, 6);
+      subRow.getCell(1).font = { size: 10, italic: true, color: { argb: "FF6B7280" } };
+
+      // Blank row
+      ws.addRow([]);
+    };
+
+    const setColumnWidths = (ws: ExcelJS.Worksheet) => {
+      ws.columns = [
+        { width: 22 },  // Service
+        { width: 12 },  // TC ID
+        { width: 45 },  // Test Case Name
+        { width: 14 },  // Result
+        { width: 40 },  // Error / Notes
+        { width: 30 },  // Linked Issue
+      ];
+    };
+
+    const addDataSheet = (
+      name: string,
+      title: string,
+      headerColor: string,
+      altColor: string,
+      serviceData: Record<string, { tc_id: string; name: string; error?: string; old_error?: string; linked?: string; result?: string }[]>,
+      resultLabel: string,
+    ) => {
+      const ws = wb.addWorksheet(name);
+      setColumnWidths(ws);
+
+      const count = Object.values(serviceData).reduce((sum, tcs) => sum + tcs.length, 0);
+      addTitleBlock(ws, title, `${count} test cases across ${Object.keys(serviceData).length} services`, headerColor);
+
+      // Header
+      const hdr = ws.addRow(["Service", "TC ID", "Test Case Name", "Result", "Error / Notes", "Linked Issue"]);
+      styleHeader(hdr, headerColor);
+
+      // Freeze panes
+      ws.views = [{ state: "frozen", ySplit: hdr.number, xSplit: 0 }];
+
+      // Data rows
+      let idx = 0;
+      for (const [svc, tcs] of Object.entries(serviceData)) {
+        for (const tc of tcs) {
+          const error = tc.old_error || tc.error || "";
+          const result = resultLabel || tc.result || "";
+          const row = ws.addRow([svc, tc.tc_id, tc.name, result, error, tc.linked || ""]);
+          styleDataRow(row, idx % 2 === 1, altColor);
+          // Bold service name on first TC of each service
+          if (tcs.indexOf(tc) === 0) {
+            row.getCell(1).font = { bold: true, size: 10, color: { argb: "FF1F2937" } };
+          }
+          idx++;
+        }
+      }
+
+      // Auto-filter
+      if (count > 0) {
+        ws.autoFilter = { from: { row: hdr.number, column: 1 }, to: { row: hdr.number + count, column: 6 } };
+      }
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 1: Summary / Overview
+    // ═══════════════════════════════════════════════════════════════
+    const summaryWs = wb.addWorksheet("Summary");
+    summaryWs.columns = [{ width: 30 }, { width: 15 }, { width: 15 }, { width: 20 }];
+
+    addTitleBlock(
+      summaryWs,
+      `Test Report Summary — ${data.platform}`,
+      `Build #${data.rc2}${data.rc2_ota ? ` (${data.rc2_ota})` : ""} vs Build #${data.rc1}${data.rc1_ota ? ` (${data.rc1_ota})` : ""}`,
+      COLORS.indigo,
+    );
+
+    // Overview table
+    const ovHdr = summaryWs.addRow(["Metric", "Count", "Percentage"]);
+    styleHeader(ovHdr, COLORS.indigo);
+    const ovRows = [
+      ["Total Test Cases", data.overview.total, "100%"],
+      ["Pass", data.overview.pass, `${data.overview.pass_pct}%`],
+      ["Known Failures", data.overview.known_failures, `${data.overview.known_pct}%`],
+      ["Unknown Failures", data.overview.unknown_failures, `${data.overview.unknown_pct}%`],
+      ["Not Executed", data.overview.not_executed, `${data.overview.ne_pct}%`],
+    ];
+    ovRows.forEach((r, i) => {
+      const row = summaryWs.addRow(r);
+      styleDataRow(row, i % 2 === 1, COLORS.indigoLight);
+    });
+
+    summaryWs.addRow([]);
+    summaryWs.addRow([]);
+
+    // Category breakdown
+    const catHdr = summaryWs.addRow(["Category", "Count", "", "Transition"]);
+    styleHeader(catHdr, COLORS.headerFill);
+    const categories = [
+      ["Stable Test Cases", data.stable_tcs?.count ?? 0, "", "Pass → Pass"],
+      ["Known Regressions", data.regressions.known_count, "", "Pass → Fail"],
+      ["Unknown Regressions", data.regressions.unknown_count, "", "Pass → Fail"],
+      ["Fixed Test Cases", data.fixed_tcs?.count ?? 0, "", "Fail → Pass"],
+      ["Known Persistent Failures", data.persistent_failures?.known_count ?? 0, "", "Fail → Fail"],
+      ["Unknown Persistent Failures", data.persistent_failures?.unknown_count ?? 0, "", "Fail → Fail"],
+      ["New Test Cases", data.new_tcs?.count ?? 0, "", "Added"],
+      ["Removed Test Cases", data.removed_tcs?.count ?? 0, "", "Removed"],
+    ];
+    categories.forEach((r, i) => {
+      const row = summaryWs.addRow(r);
+      styleDataRow(row, i % 2 === 1);
+      // Color-code the category cell
+      const colorMap: Record<number, string> = {
+        0: COLORS.emerald, 1: COLORS.orange, 2: COLORS.rose,
+        3: COLORS.teal, 4: COLORS.amber, 5: COLORS.red,
+        6: COLORS.sky, 7: COLORS.violet,
+      };
+      row.getCell(1).font = { bold: true, size: 10, color: { argb: `FF${colorMap[i]}` } };
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 2: Stable TCs
+    // ═══════════════════════════════════════════════════════════════
     if (data.stable_tcs && data.stable_tcs.count > 0) {
-      addSectionHeader(`STABLE TEST CASES (Pass → Pass) — ${data.stable_tcs.count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.stable_tcs.by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, "PASS → PASS", "", tc.linked || ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("Stable TCs", "Stable Test Cases (Pass → Pass)", COLORS.emerald, COLORS.emeraldLight, data.stable_tcs.by_service, "PASS → PASS");
     }
 
-    // Regressions - Known
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 3: Known Regressions
+    // ═══════════════════════════════════════════════════════════════
     if (data.regressions.known_count > 0) {
-      addSectionHeader(`KNOWN REGRESSIONS (Pass → Fail) — ${data.regressions.known_count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.regressions.known_by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, "PASS → FAIL", tc.error || "", tc.linked || ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("Known Regressions", "Known Regressions (Pass → Fail)", COLORS.orange, COLORS.orangeLight, data.regressions.known_by_service, "PASS → FAIL");
     }
 
-    // Regressions - Unknown
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 4: Unknown Regressions
+    // ═══════════════════════════════════════════════════════════════
     if (data.regressions.unknown_count > 0) {
-      addSectionHeader(`UNKNOWN REGRESSIONS (Pass → Fail) — ${data.regressions.unknown_count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.regressions.unknown_by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, "PASS → FAIL", tc.error || "", ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("Unknown Regressions", "Unknown Regressions (Pass → Fail)", COLORS.rose, COLORS.roseLight, data.regressions.unknown_by_service, "PASS → FAIL");
     }
 
-    // Fixed TCs
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 5: Fixed TCs
+    // ═══════════════════════════════════════════════════════════════
     if (data.fixed_tcs && data.fixed_tcs.count > 0) {
-      addSectionHeader(`FIXED TEST CASES (Fail → Pass) — ${data.fixed_tcs.count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.fixed_tcs.by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, "FAIL → PASS", tc.old_error || "", tc.linked || ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("Fixed TCs", "Fixed Test Cases (Fail → Pass)", COLORS.teal, COLORS.tealLight, data.fixed_tcs.by_service, "FAIL → PASS");
     }
 
-    // Persistent Failures - Known
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 6: Known Persistent Failures
+    // ═══════════════════════════════════════════════════════════════
     if (data.persistent_failures && data.persistent_failures.known_count > 0) {
-      addSectionHeader(`KNOWN PERSISTENT FAILURES (Fail → Fail) — ${data.persistent_failures.known_count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.persistent_failures.known_by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, "FAIL → FAIL", tc.error || "", tc.linked || ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("Known Persistent", "Known Persistent Failures (Fail → Fail)", COLORS.amber, COLORS.amberLight, data.persistent_failures.known_by_service, "FAIL → FAIL");
     }
 
-    // Persistent Failures - Unknown
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 7: Unknown Persistent Failures
+    // ═══════════════════════════════════════════════════════════════
     if (data.persistent_failures && data.persistent_failures.unknown_count > 0) {
-      addSectionHeader(`UNKNOWN PERSISTENT FAILURES (Fail → Fail) — ${data.persistent_failures.unknown_count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.persistent_failures.unknown_by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, "FAIL → FAIL", tc.error || "", ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("Unknown Persistent", "Unknown Persistent Failures (Fail → Fail)", COLORS.red, COLORS.redLight, data.persistent_failures.unknown_by_service, "FAIL → FAIL");
     }
 
-    // New TCs
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 8: New TCs
+    // ═══════════════════════════════════════════════════════════════
     if (data.new_tcs && data.new_tcs.count > 0) {
-      addSectionHeader(`NEW TEST CASES (Only in Build #${data.rc2}) — ${data.new_tcs.count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.new_tcs.by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, tc.result || "", tc.error || "", tc.linked || ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("New TCs", `New Test Cases (Only in Build #${data.rc2})`, COLORS.sky, COLORS.skyLight, data.new_tcs.by_service, "");
     }
 
-    // Removed TCs
+    // ═══════════════════════════════════════════════════════════════
+    // SHEET 9: Removed TCs
+    // ═══════════════════════════════════════════════════════════════
     if (data.removed_tcs && data.removed_tcs.count > 0) {
-      addSectionHeader(`REMOVED TEST CASES (Only in Build #${data.rc1}) — ${data.removed_tcs.count} TCs`);
-      for (const [svc, tcs] of Object.entries(data.removed_tcs.by_service)) {
-        for (const tc of tcs) {
-          rows.push([svc, tc.tc_id, tc.name, tc.result || "", tc.error || "", tc.linked || ""]);
-        }
-      }
-      addSeparator();
+      addDataSheet("Removed TCs", `Removed Test Cases (Only in Build #${data.rc1})`, COLORS.violet, COLORS.violetLight, data.removed_tcs.by_service, "");
     }
 
-    // Summary footer
-    rows.push(["── Summary ──"]);
-    rows.push(["Category", "Count"]);
-    rows.push(["Stable (Pass → Pass)", String(data.stable_tcs?.count ?? 0)]);
-    rows.push(["Known Regressions", String(data.regressions.known_count)]);
-    rows.push(["Unknown Regressions", String(data.regressions.unknown_count)]);
-    rows.push(["Fixed (Fail → Pass)", String(data.fixed_tcs?.count ?? 0)]);
-    rows.push(["Known Persistent Failures", String(data.persistent_failures?.known_count ?? 0)]);
-    rows.push(["Unknown Persistent Failures", String(data.persistent_failures?.unknown_count ?? 0)]);
-    rows.push(["New Test Cases", String(data.new_tcs?.count ?? 0)]);
-    rows.push(["Removed Test Cases", String(data.removed_tcs?.count ?? 0)]);
-
-    // Convert to CSV
-    const csvContent = rows.map(row =>
-      row.map(cell => {
-        const escaped = cell.replace(/"/g, '""');
-        return cell.includes(",") || cell.includes('"') || cell.includes("\n") ? `"${escaped}"` : cell;
-      }).join(",")
-    ).join("\n");
-
-    // Download
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `test_report_${data.platform}_${data.rc1}_vs_${data.rc2}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // ── Generate & download ──
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    saveAs(blob, `Test_Report_${data.platform}_${data.rc1}_vs_${data.rc2}.xlsx`);
   };
 
   // ── Render ──
@@ -857,13 +965,13 @@ export default function TestReportDashboard() {
             <span className="text-gray-500 text-xs">{data.overview.total} total test cases</span>
             <div className="ml-auto">
               <button
-                onClick={downloadCSV}
+                onClick={downloadExcel}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-300 text-xs font-medium transition-all duration-200 shadow-sm hover:shadow-emerald-500/10"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                Download CSV Report
+                Download Excel Report
               </button>
             </div>
           </div>
