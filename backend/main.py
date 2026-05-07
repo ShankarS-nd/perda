@@ -1012,7 +1012,8 @@ async def test_report_summary(payload: TestReportRequest):
 
 class ConfidenceRequest(BaseModel):
     platform: str = "K1_US"
-    builds: list[str]   # list of Jenkins job numbers
+    builds: list[str] = []   # list of Jenkins job numbers
+    build_urls: list[str] = []  # list of full Jenkins URLs (overrides builds)
     tc_ids: list[str] = []  # optional — filter to specific TC IDs only
 
 
@@ -1031,6 +1032,7 @@ async def test_case_confidence(payload: ConfidenceRequest):
         PLATFORMS,
         _jenkins_session,
         fetch_report_js,
+        fetch_report_js_from_url,
         parse_report_data,
         aggregate_results,
         extract_tc_id,
@@ -1044,36 +1046,57 @@ async def test_case_confidence(payload: ConfidenceRequest):
             detail=f"Unknown platform '{platform}'. Valid: {', '.join(PLATFORMS)}",
         )
 
+    # Determine whether we're using URLs or build numbers
+    build_urls = [u.strip() for u in payload.build_urls if u.strip()]
     builds = [b.strip() for b in payload.builds if b.strip()]
-    if len(builds) < 2:
-        raise HTTPException(status_code=400, detail="At least 2 build numbers are required.")
+    use_urls = len(build_urls) >= 2
+
+    if not use_urls and len(builds) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 build numbers or URLs are required.")
 
     session = _jenkins_session()
 
     # Fetch & parse every build (auto-retry once on Jenkins auth failure)
     build_results: list[pd.DataFrame] = []
-    for build_num in builds:
+    items = build_urls if use_urls else builds
+    resolved_builds: list[str] = []
+
+    for item in items:
+        label = item
         try:
-            js = fetch_report_js(build_num, session, use_cache=True)
+            if use_urls:
+                js, _job_base, build_num = fetch_report_js_from_url(item, session, use_cache=True)
+                label = build_num
+            else:
+                build_num = item
+                js = fetch_report_js(build_num, session, use_cache=True)
         except (SystemExit, Exception) as exc:
             if _is_jenkins_auth_error(str(exc)):
-                logger.info(f"Jenkins auth failure for build {build_num} — refreshing token and retrying…")
+                logger.info(f"Jenkins auth failure for {label} — refreshing token and retrying…")
                 refresh = _refresh_jenkins_token()
                 if refresh["ok"]:
                     session = _jenkins_session()
                     try:
-                        js = fetch_report_js(build_num, session, use_cache=True)
+                        if use_urls:
+                            js, _job_base, build_num = fetch_report_js_from_url(item, session, use_cache=True)
+                            label = build_num
+                        else:
+                            js = fetch_report_js(item, session, use_cache=True)
+                            build_num = item
                     except (SystemExit, Exception) as exc2:
-                        raise HTTPException(status_code=500, detail=f"Build {build_num}: {exc2}")
+                        raise HTTPException(status_code=500, detail=f"Build {label}: {exc2}")
                 else:
-                    raise HTTPException(status_code=500, detail=f"Build {build_num}: {exc}")
+                    raise HTTPException(status_code=500, detail=f"Build {label}: {exc}")
             else:
-                raise HTTPException(status_code=500, detail=f"Build {build_num}: {exc}")
+                raise HTTPException(status_code=500, detail=f"Build {label}: {exc}")
         _svc, tc_raw = parse_report_data(js)
         tc = aggregate_results(tc_raw)
         tc["TC_ID"] = tc["Testcase Name"].apply(extract_tc_id)
         tc["_build"] = build_num
         build_results.append(tc)
+        resolved_builds.append(build_num)
+
+    builds = resolved_builds
 
     all_tc = pd.concat(build_results, ignore_index=True)
 

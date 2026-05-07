@@ -140,6 +140,8 @@ function downloadConfidenceCsv(
 export default function ConfidenceDashboard() {
   const [platform, setPlatform] = useState("K1_US");
   const [buildsInput, setBuildsInput] = useState("");
+  const [urlsInput, setUrlsInput] = useState("");
+  const [useUrls, setUseUrls] = useState(false);
   const [tcIdsInput, setTcIdsInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -175,9 +177,18 @@ export default function ConfidenceDashboard() {
 
   const fetchData = useCallback(async () => {
     const builds = buildsInput.split(",").map((b) => b.trim()).filter(Boolean);
-    if (builds.length < 2) {
-      setError("Enter at least 2 build numbers, comma-separated.");
-      return;
+    const urls = urlsInput.split("\n").map((u) => u.trim()).filter(Boolean);
+
+    if (useUrls) {
+      if (urls.length < 2) {
+        setError("Enter at least 2 Jenkins URLs (one per line).");
+        return;
+      }
+    } else {
+      if (builds.length < 2) {
+        setError("Enter at least 2 build numbers, comma-separated.");
+        return;
+      }
     }
     setError("");
     setLoading(true);
@@ -191,7 +202,8 @@ export default function ConfidenceDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           platform,
-          builds,
+          builds: useUrls ? [] : builds,
+          build_urls: useUrls ? urls : [],
           tc_ids: tcIdsInput.split(",").map((t) => t.trim()).filter(Boolean),
         }),
       });
@@ -203,7 +215,7 @@ export default function ConfidenceDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [platform, buildsInput, tcIdsInput]);
+  }, [platform, buildsInput, urlsInput, useUrls, tcIdsInput]);
 
   const handleBoxClick = (key: BucketKey) => {
     if (activeBox === key) {
@@ -242,7 +254,7 @@ export default function ConfidenceDashboard() {
 
       {/* Input form */}
       <div className="rounded-xl border border-white/[0.06] bg-[#161922] p-5 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr_auto] gap-4 items-end">
+        <div className={`grid grid-cols-1 ${useUrls ? "md:grid-cols-[200px_auto]" : "md:grid-cols-[200px_1fr_auto]"} gap-4 items-end`}>
           {/* Platform */}
           <div>
             <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
@@ -259,27 +271,29 @@ export default function ConfidenceDashboard() {
             </select>
           </div>
 
-          {/* Build Numbers */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">
-                Jenkins Build Numbers (comma-separated)
-              </label>
-              <button
-                onClick={applySavedBuilds}
-                className="text-[10px] font-medium text-cyan-400 hover:text-cyan-300 transition-colors"
-                title="Load saved builds for this platform"
-              >
-                Load Saved Builds
-              </button>
+          {/* Build Numbers (shown when not using URLs) */}
+          {!useUrls && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+                  Jenkins Build Numbers (comma-separated)
+                </label>
+                <button
+                  onClick={applySavedBuilds}
+                  className="text-[10px] font-medium text-cyan-400 hover:text-cyan-300 transition-colors"
+                  title="Load saved builds for this platform"
+                >
+                  Load Saved Builds
+                </button>
+              </div>
+              <input
+                value={buildsInput}
+                onChange={(e) => setBuildsInput(e.target.value)}
+                placeholder="e.g. 857, 865, 871, 873"
+                className="w-full rounded-lg border border-white/10 bg-[#0f1117] px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition"
+              />
             </div>
-            <input
-              value={buildsInput}
-              onChange={(e) => setBuildsInput(e.target.value)}
-              placeholder="e.g. 857, 865, 871, 873"
-              className="w-full rounded-lg border border-white/10 bg-[#0f1117] px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition"
-            />
-          </div>
+          )}
 
           {/* Analyse button */}
           <button
@@ -305,6 +319,37 @@ export default function ConfidenceDashboard() {
             )}
           </button>
         </div>
+
+        {/* ── Direct URL toggle ── */}
+        <div className="mt-4 mb-4">
+          <button
+            type="button"
+            onClick={() => setUseUrls(!useUrls)}
+            className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-300 transition-colors"
+          >
+            <div className={`relative w-8 h-[18px] rounded-full transition-colors ${useUrls ? "bg-cyan-500/40" : "bg-white/10"}`}>
+              <div className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all ${useUrls ? "left-[16px]" : "left-[2px]"}`} />
+            </div>
+            <span>Use Direct Jenkins URLs</span>
+            {useUrls && <span className="text-gray-600 text-[10px]">(paste full URLs — one per line)</span>}
+          </button>
+        </div>
+
+        {/* ── URL input (shown when toggle is on) ── */}
+        {useUrls && (
+          <div className="mb-4 animate-in fade-in duration-200">
+            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+              Jenkins Build URLs <span className="text-gray-700">(one per line — at least 2)</span>
+            </label>
+            <textarea
+              value={urlsInput}
+              onChange={(e) => setUrlsInput(e.target.value)}
+              placeholder={"https://build-device.netradyne.info/view/.../job/Test_Automation_Parallel/857/\nhttps://build-device.netradyne.info/view/.../job/SomeOtherJob/123/"}
+              rows={4}
+              className="w-full rounded-lg border border-white/10 bg-[#0f1117] px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition font-mono text-xs leading-relaxed resize-y"
+            />
+          </div>
+        )}
 
         {/* TC IDs filter (optional) */}
         <div className="mt-4">
@@ -332,7 +377,7 @@ export default function ConfidenceDashboard() {
           <svg className="h-12 w-12 mx-auto mb-3 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
           </svg>
-          <p className="text-sm">Enter a platform and at least two build numbers to start.</p>
+          <p className="text-sm">Enter a platform and at least two build numbers or URLs to start.</p>
         </div>
       )}
 
