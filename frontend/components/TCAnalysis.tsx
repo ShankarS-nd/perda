@@ -65,7 +65,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 export default function TCAnalysis() {
   const [build, setBuild] = useState("");
   const [tcId, setTcId] = useState("");
-  const [branch, setBranch] = useState("QA_6.12_20251108_BI");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<AnalysisResult | null>(null);
@@ -177,7 +176,6 @@ export default function TCAnalysis() {
         body: JSON.stringify({
           build: build.trim(),
           tc_id: tcId.trim(),
-          branch: branch.trim(),
         }),
       });
       const body = await res.json();
@@ -185,16 +183,16 @@ export default function TCAnalysis() {
       const result = body as AnalysisResult;
       setData(result);
 
-      // Auto-fetch source code if branch is provided
-      if (branch.trim() && result.file_name) {
-        fetchSource(branch.trim(), result.file_name);
+      // Jenkins supplies the branch for this build; use it to fetch the source.
+      if (result.branch && result.file_name) {
+        fetchSource(result.branch, result.file_name);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [build, tcId, branch, fetchSource]);
+  }, [build, tcId, fetchSource]);
 
   // Fetch logs for a specific device (re-uses cached scr.js on backend)
   const fetchForDevice = useCallback(async (deviceId: string) => {
@@ -214,7 +212,6 @@ export default function TCAnalysis() {
         body: JSON.stringify({
           build: data.build,
           tc_id: data.tc_id,
-          branch: data.branch,
           device_id: deviceId,
         }),
       });
@@ -940,7 +937,7 @@ export default function TCAnalysis() {
 
       {/* Input form */}
       <div className="rounded-xl border border-white/[0.06] bg-[#161922] p-5 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-4 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-end">
           {/* Build Number */}
           <div>
             <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
@@ -963,19 +960,6 @@ export default function TCAnalysis() {
               value={tcId}
               onChange={(e) => setTcId(e.target.value)}
               placeholder="e.g. TC-185"
-              className="w-full rounded-lg border border-white/10 bg-[#0f1117] px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 outline-none transition"
-            />
-          </div>
-
-          {/* Branch */}
-          <div>
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
-              Branch <span className="text-gray-700">(optional)</span>
-            </label>
-            <input
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              placeholder="e.g. release/5.6.13"
               className="w-full rounded-lg border border-white/10 bg-[#0f1117] px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 outline-none transition"
             />
           </div>
@@ -1406,7 +1390,7 @@ export default function TCAnalysis() {
                     <p className="text-sm">
                       {data.branch
                         ? "Source code not loaded yet."
-                        : "Enter a branch name in the form above and re-analyze to fetch source code."}
+                        : "The Jenkins build did not provide a branch for source lookup."}
                     </p>
                     {data.branch && data.file_name && (
                       <button

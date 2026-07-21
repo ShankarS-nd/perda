@@ -278,13 +278,13 @@ export default function ScriptRunner({
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center">
         <div className="relative mb-6">
-          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 border border-indigo-500/10">
-            <svg className="h-9 w-9 text-indigo-400/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-accent-cyan/10 to-accent-violet/10 border border-accent-cyan/10 shadow-[0_0_30px_rgba(6,182,212,0.1)]">
+            <svg className="h-9 w-9 text-accent-cyan/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
             </svg>
           </div>
-          <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10 flex items-center justify-center">
-            <svg className="h-3 w-3 text-indigo-400/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-gradient-to-br from-accent-violet/20 to-accent-cyan/20 border border-accent-violet/10 flex items-center justify-center shadow-[0_0_15px_rgba(139,92,246,0.15)]">
+            <svg className="h-3 w-3 text-accent-violet/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
             </svg>
           </div>
@@ -305,8 +305,8 @@ export default function ScriptRunner({
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10">
-              <svg className="h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-accent-cyan/15 to-accent-violet/15 border border-accent-cyan/10 shadow-[0_0_20px_rgba(6,182,212,0.1)]">
+              <svg className="h-5 w-5 text-accent-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
               </svg>
             </div>
@@ -333,14 +333,12 @@ export default function ScriptRunner({
           )}
           {exitCode !== null && !loading && (
             <span
-              className={`ds-badge ${
-                exitCode === 0 ? "ds-badge-success" : "ds-badge-error"
-              }`}
+              className={`ds-badge ${exitCode === 0 ? "ds-badge-success" : "ds-badge-error"
+                }`}
             >
               <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  exitCode === 0 ? "bg-green-400" : "bg-red-400"
-                }`}
+                className={`h-1.5 w-1.5 rounded-full ${exitCode === 0 ? "bg-green-400" : "bg-red-400"
+                  }`}
               />
               {exitCode === 0 ? "Success" : `Exit ${exitCode}`}
             </span>
@@ -404,18 +402,16 @@ export default function ScriptRunner({
                           argValues[arg.name] === "true" ? "false" : "true"
                         )
                       }
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-                        argValues[arg.name] === "true"
-                          ? "bg-indigo-600"
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${argValues[arg.name] === "true"
+                          ? "bg-accent-violet shadow-[0_0_10px_rgba(139,92,246,0.4)]"
                           : "bg-white/[0.08]"
-                      }`}
+                        }`}
                     >
                       <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${
-                          argValues[arg.name] === "true"
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${argValues[arg.name] === "true"
                             ? "translate-x-6"
                             : "translate-x-1"
-                        }`}
+                          }`}
                       />
                     </button>
                   ) : (
@@ -504,7 +500,7 @@ export default function ScriptRunner({
 
         <pre
           ref={consoleRef}
-          className="console-output h-80 overflow-y-auto bg-[#0a0c12] p-4 font-[family-name:var(--font-geist-mono)] text-sm leading-relaxed"
+          className="console-output h-80 overflow-y-auto bg-base-900/80 backdrop-blur-md p-4 font-mono text-[13px] leading-relaxed border-t border-white/[0.03]"
         >
           {lines.length === 0 && !loading ? (
             <span className="text-gray-600 italic">
