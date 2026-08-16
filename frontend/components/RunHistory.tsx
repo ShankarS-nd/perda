@@ -32,6 +32,8 @@ export default function RunHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<ScriptRun | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "success" | "failed">("all");
 
   const fetchRuns = useCallback(async () => {
     setLoading(true);
@@ -75,30 +77,43 @@ export default function RunHistory() {
     }
   };
 
+  /* Relative age reads faster than an absolute clock time when you are
+     scanning for "what just ran" — the exact stamp stays on hover. */
+  const formatRelative = (ts: string): string => {
+    const then = new Date(ts).getTime();
+    if (Number.isNaN(then)) return ts;
+    const secs = Math.round((Date.now() - then) / 1000);
+    if (secs < 0) return "just now";
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.round(hrs / 24);
+    if (days < 30) return `${days}d ago`;
+    return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
+
+  const isFailed = (status: string) => status.toLowerCase() !== "success";
+
+  const visibleRuns = runs.filter((run) => {
+    if (statusFilter === "success" && isFailed(run.status)) return false;
+    if (statusFilter === "failed" && !isFailed(run.status)) return false;
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      run.script_name.toLowerCase().includes(q) ||
+      (run.arguments ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const failedCount = runs.filter((r) => isFailed(r.status)).length;
+
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* Heading */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10">
-            <svg className="h-[18px] w-[18px] text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="ds-page-title">
-              Run History
-            </h2>
-            <p className="ds-page-subtitle">
-              View past script executions and their logs
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={fetchRuns}
-          disabled={loading}
-          className="ds-btn-secondary"
-        >
+    <div className="w-full space-y-6">
+      {/* Identity lives in the top bar; only the action remains. */}
+      <div className="flex items-center justify-end">
+        <button onClick={fetchRuns} disabled={loading} className="ds-btn-secondary">
           <RefreshIcon spinning={loading} />
           Refresh
         </button>
@@ -116,25 +131,83 @@ export default function RunHistory() {
 
       {/* Table card */}
       <div className="ds-card overflow-hidden">
-        <div className="ds-card-header flex items-center justify-between">
+        <div className="ds-card-header flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-gray-300">
             Executions{" "}
             {!loading && (
-              <span className="font-normal text-gray-500">· {runs.length} runs</span>
+              <span className="font-normal text-gray-500">
+                · {visibleRuns.length === runs.length
+                  ? `${runs.length} runs`
+                  : `${visibleRuns.length} of ${runs.length}`}
+              </span>
             )}
           </h3>
+
+          {!loading && runs.length > 0 && (
+            <div className="flex items-center gap-2">
+              {/* Status segments — failed is the state people hunt for, so
+                  it carries its own count and is reachable in one click. */}
+              <div className="flex items-center rounded-lg border border-white/[0.07] bg-white/[0.02] p-0.5">
+                {([
+                  ["all", `All`],
+                  ["success", `Passed`],
+                  ["failed", failedCount ? `Failed · ${failedCount}` : `Failed`],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setStatusFilter(key)}
+                    aria-pressed={statusFilter === key}
+                    className={`px-2.5 py-1 rounded-[6px] text-[12px] font-medium transition-colors duration-150 ${
+                      statusFilter === key
+                        ? "bg-white/[0.07] text-gray-100"
+                        : "text-gray-500 hover:text-gray-300"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative">
+                <svg
+                  className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-600"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                </svg>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter scripts…"
+                  aria-label="Filter runs by script name or arguments"
+                  className="ds-input w-52 !py-1.5 !pl-8 !pr-7 !text-[13px]"
+                />
+                {query && (
+                  <button
+                    onClick={() => setQuery("")}
+                    aria-label="Clear filter"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-300 transition-colors duration-150"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[min(640px,calc(100vh-300px))]">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Spinner />
               <span className="ml-3 text-sm text-gray-500">Loading history…</span>
             </div>
           ) : runs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="ds-empty">
               <div className="relative mb-5">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 border border-indigo-500/10">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.04] border border-white/[0.07]">
                   <EmptyIcon />
                 </div>
               </div>
@@ -163,36 +236,69 @@ export default function RunHistory() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.03]">
-                {runs.map((run) => (
+                {visibleRuns.map((run) => (
+                  /* The whole row opens the logs — a 5px-tall badge was the
+                     only hit target before. The badge stays as the visible
+                     affordance but the click area is now the full row. */
                   <tr
                     key={run.id}
-                    className="transition-colors hover:bg-white/[0.02]"
+                    onClick={() => setSelectedRun(run)}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View logs for ${run.script_name}`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedRun(run);
+                      }
+                    }}
+                    className="group cursor-pointer transition-colors duration-150 hover:bg-white/[0.03] focus-visible:bg-white/[0.04]"
                   >
-                    <td className="px-5 py-3.5">
+                    <td className="px-5 py-2.5">
                       <span className="font-medium text-gray-200">
                         {run.script_name}
                       </span>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className="px-5 py-2.5">
                       <StatusBadge status={run.status} />
                     </td>
-                    <td className="px-5 py-3.5 font-mono text-gray-400 text-xs">
+                    <td className="px-5 py-2.5 font-mono text-gray-400 text-xs tabular-nums">
                       {formatTime(run.execution_time)}
                     </td>
-                    <td className="px-5 py-3.5 text-gray-400 text-xs">
-                      {formatTimestamp(run.timestamp)}
+                    <td
+                      className="px-5 py-2.5 text-gray-400 text-xs tabular-nums"
+                      title={formatTimestamp(run.timestamp)}
+                    >
+                      {formatRelative(run.timestamp)}
                     </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <button
-                        onClick={() => setSelectedRun(run)}
-                        className="ds-badge ds-badge-info cursor-pointer hover:opacity-80 transition-opacity"
-                      >
+                    <td className="px-5 py-2.5 text-right">
+                      <span className="ds-badge ds-badge-info opacity-70 transition-opacity duration-150 group-hover:opacity-100">
                         <LogsIcon />
                         View Logs
-                      </button>
+                      </span>
                     </td>
                   </tr>
                 ))}
+                {visibleRuns.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>
+                      <div className="ds-empty !border-0 !bg-transparent">
+                        <p className="ds-empty-title">No runs match this filter</p>
+                        <p className="ds-empty-hint">
+                          {query
+                            ? <>Nothing matches “{query}”.</>
+                            : "Try a different status."}
+                        </p>
+                        <button
+                          onClick={() => { setQuery(""); setStatusFilter("all"); }}
+                          className="ds-btn-secondary mt-1"
+                        >
+                          Clear filters
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}

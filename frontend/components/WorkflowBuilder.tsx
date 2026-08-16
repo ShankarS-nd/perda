@@ -550,7 +550,7 @@ export default function WorkflowBuilder() {
       {/* Top bar */}
       <div className="flex items-center gap-3 flex-wrap ds-card px-4 py-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="h-8 w-8 rounded-[10px] bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10 flex items-center justify-center shrink-0">
+          <div className="h-8 w-8 rounded-[10px] bg-white/[0.04] border border-white/[0.07] flex items-center justify-center shrink-0">
             <svg className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
             </svg>

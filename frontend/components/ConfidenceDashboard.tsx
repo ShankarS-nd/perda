@@ -232,32 +232,15 @@ export default function ConfidenceDashboard() {
   };
 
   return (
-    <div className="max-w-[1400px] mx-auto">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-1.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-teal-500/20 border border-cyan-500/10">
-            <svg className="h-4.5 w-4.5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">
-              Test Case Confidence
-            </h1>
-            <p className="text-xs text-gray-500">
-              Analyse pass-rate across multiple Jenkins builds
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="w-full">
+      
 
       {/* Input form */}
       <div className="rounded-xl border border-white/[0.06] bg-[#161922] p-5 mb-6">
         <div className={`grid grid-cols-1 ${useUrls ? "md:grid-cols-[200px_auto]" : "md:grid-cols-[200px_1fr_auto]"} gap-4 items-end`}>
           {/* Platform */}
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <label className="ds-label mb-1.5">
               Platform
             </label>
             <select
@@ -275,7 +258,7 @@ export default function ConfidenceDashboard() {
           {!useUrls && (
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+                <label className="ds-label">
                   Jenkins Build Numbers (comma-separated)
                 </label>
                 <button
@@ -299,7 +282,7 @@ export default function ConfidenceDashboard() {
           <button
             onClick={fetchData}
             disabled={loading}
-            className="flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-cyan-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="ds-btn-primary shrink-0"
           >
             {loading ? (
               <>
@@ -338,7 +321,7 @@ export default function ConfidenceDashboard() {
         {/* ── URL input (shown when toggle is on) ── */}
         {useUrls && (
           <div className="mb-4 animate-in fade-in duration-200">
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <label className="ds-label mb-1.5">
               Jenkins Build URLs <span className="text-gray-700">(one per line — at least 2)</span>
             </label>
             <textarea
@@ -353,7 +336,7 @@ export default function ConfidenceDashboard() {
 
         {/* TC IDs filter (optional) */}
         <div className="mt-4">
-          <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+          <label className="ds-label mb-1.5">
             TC IDs <span className="text-gray-700">(optional — comma-separated, filters to specific TCs only)</span>
           </label>
           <input
@@ -373,7 +356,7 @@ export default function ConfidenceDashboard() {
 
       {/* Placeholder */}
       {!data && !loading && !error && (
-        <div className="text-center py-20 text-gray-600">
+        <div className="ds-empty">
           <svg className="h-12 w-12 mx-auto mb-3 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
           </svg>
@@ -383,7 +366,7 @@ export default function ConfidenceDashboard() {
 
       {/* Loading */}
       {loading && (
-        <div className="flex items-center justify-center py-20 gap-3 text-gray-500">
+        <div className="ds-loading">
           <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -477,7 +460,7 @@ function ConfidenceBox({
         active ? `ring-2 ${c.ring} scale-[1.015]` : ""
       }`}
     >
-      <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+      <p className="text-[12px] font-medium text-gray-400 mb-1.5">
         {label}
       </p>
       <div className="flex items-baseline gap-2">
@@ -547,7 +530,7 @@ function ConfidenceDrillDown({
           Download CSV
         </button>
       </div>
-      <div className="divide-y divide-white/[0.03] max-h-[500px] overflow-y-auto scrollbar-thin">
+      <div className="divide-y divide-white/[0.03] overflow-y-auto scrollbar-thin max-h-[min(620px,calc(100vh-340px))]">
         {entries.map(([svc, tcs]) => (
           <div key={svc}>
             <button

@@ -85,24 +85,10 @@ export default function WorkflowExecution() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10">
-            <svg className="h-[18px] w-[18px] text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="ds-page-title">Workflow Runs</h2>
-            <p className="ds-page-subtitle">Execution history for all workflows</p>
-          </div>
-        </div>
-        <button
-          onClick={fetchRuns}
-          disabled={loading}
-          className="ds-btn-secondary"
-        >
+    <div className="w-full space-y-6">
+      {/* Identity lives in the top bar; only the action remains. */}
+      <div className="flex items-center justify-end">
+        <button onClick={fetchRuns} disabled={loading} className="ds-btn-secondary">
           <RefreshIcon spinning={loading} />
           Refresh
         </button>
@@ -115,15 +101,15 @@ export default function WorkflowExecution() {
             Recent Runs <span className="font-normal text-gray-500">· {runs.length}</span>
           </h3>
         </div>
-        <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[min(560px,calc(100vh-320px))]">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Spinner /> <span className="ml-3 text-sm text-gray-500">Loading…</span>
             </div>
           ) : runs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="ds-empty">
               <div className="relative mb-5">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 border border-indigo-500/10">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.04] border border-white/[0.07]">
                   <svg className="h-8 w-8 text-indigo-400/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
                   </svg>

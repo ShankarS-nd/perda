@@ -918,32 +918,15 @@ export default function TCAnalysis() {
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-1.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/10">
-            <svg className="h-4.5 w-4.5 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">
-              TC Analysis
-            </h1>
-            <p className="text-xs text-gray-500">
-              Fetch automation logs for a specific test case from Jenkins
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="w-full">
+      
 
       {/* Input form */}
       <div className="rounded-xl border border-white/[0.06] bg-[#161922] p-5 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-4 items-end">
           {/* Build Number */}
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <label className="ds-label mb-1.5">
               Build Number
             </label>
             <input
@@ -956,7 +939,7 @@ export default function TCAnalysis() {
 
           {/* TC ID */}
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <label className="ds-label mb-1.5">
               TC ID
             </label>
             <input
@@ -969,7 +952,7 @@ export default function TCAnalysis() {
 
           {/* Branch */}
           <div>
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <label className="ds-label mb-1.5">
               Branch <span className="text-gray-700">(optional)</span>
             </label>
             <input
@@ -984,7 +967,7 @@ export default function TCAnalysis() {
           <button
             onClick={fetchAnalysis}
             disabled={loading}
-            className="flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="ds-btn-primary shrink-0"
           >
             {loading ? (
               <>
@@ -1014,7 +997,7 @@ export default function TCAnalysis() {
 
       {/* Placeholder */}
       {!data && !loading && !error && (
-        <div className="text-center py-20 text-gray-600">
+        <div className="ds-empty">
           <svg className="h-12 w-12 mx-auto mb-3 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
           </svg>
@@ -1024,7 +1007,7 @@ export default function TCAnalysis() {
 
       {/* Loading */}
       {loading && (
-        <div className="flex items-center justify-center py-20 gap-3 text-gray-500">
+        <div className="ds-loading">
           <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1040,7 +1023,7 @@ export default function TCAnalysis() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* TC Details */}
             <div className="rounded-xl border border-violet-500/20 bg-[#161922] p-5">
-              <h3 className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-3">
+              <h3 className="text-[13px] font-semibold text-violet-300 tracking-[-0.005em] mb-3">
                 Test Case Info
               </h3>
               <div className="space-y-2.5 text-sm">
@@ -1060,7 +1043,7 @@ export default function TCAnalysis() {
 
             {/* Timing */}
             <div className="rounded-xl border border-indigo-500/20 bg-[#161922] p-5">
-              <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-3">
+              <h3 className="text-[13px] font-semibold text-indigo-300 tracking-[-0.005em] mb-3">
                 Execution Timing
               </h3>
               <div className="space-y-2.5 text-sm">
@@ -1075,7 +1058,7 @@ export default function TCAnalysis() {
 
             {/* Device Summary */}
             <div className="rounded-xl border border-sky-500/20 bg-[#161922] p-5">
-              <h3 className="text-xs font-semibold text-sky-400 uppercase tracking-wider mb-3">
+              <h3 className="text-[13px] font-semibold text-sky-300 tracking-[-0.005em] mb-3">
                 Device Execution Summary
               </h3>
               {data.all_devices.length === 0 ? (
@@ -1851,7 +1834,7 @@ export default function TCAnalysis() {
                   >
                     <table className="w-full text-[11px] font-mono">
                       <thead className="sticky top-0 z-10 bg-[#0d0f15] border-b border-white/[0.06]">
-                        <tr className="text-left text-[10px] text-gray-600 uppercase tracking-wider">
+                        <tr className="text-left text-[11px] text-gray-500">
                           <th className="px-3 py-2 w-[160px]">Timestamp (UTC)</th>
                           <th className="px-2 py-2 w-[110px]">Service</th>
                           <th className="px-2 py-2 w-[44px]">Lvl</th>
@@ -1937,7 +1920,7 @@ export default function TCAnalysis() {
             {/* AI Header + Button */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
               <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/10">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.05] border border-white/[0.08]">
                   <svg className="h-4 w-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
                   </svg>
@@ -1976,7 +1959,7 @@ export default function TCAnalysis() {
                 <button
                   onClick={runAiAnalysis}
                   disabled={aiLoading}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 text-[12px] font-semibold text-white shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-violet-500/30 bg-violet-500/10 text-[12px] font-semibold text-violet-300 hover:bg-violet-500/16 hover:border-violet-500/45 hover:text-violet-200 transition-colors duration-150 disabled:opacity-45 disabled:cursor-not-allowed"
                   title="Smart-filtered analysis (fast)"
                 >
                   {aiLoading && aiStatus !== "deep" ? (
@@ -1999,7 +1982,7 @@ export default function TCAnalysis() {
                 <button
                   onClick={runDeepAnalysis}
                   disabled={aiLoading}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-cyan-600 text-[12px] font-semibold text-white shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 text-[12px] font-semibold text-white hover:bg-violet-500 transition-colors duration-150 disabled:opacity-45 disabled:cursor-not-allowed"
                   title="Map-Reduce deep analysis (analyzes all data in chunks)"
                 >
                   {aiLoading && aiStatus === "deep" ? (
@@ -2047,7 +2030,7 @@ export default function TCAnalysis() {
                     {/* Progress bar */}
                     <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-indigo-500 to-cyan-500 rounded-full transition-all duration-500 ease-out"
+                        className="h-full bg-gradient-to-r from-violet-500 to-indigo-400 rounded-full transition-[width] duration-500 ease-out"
                         style={{ width: `${aiDeepProgress.total > 0 ? (aiDeepProgress.chunk / aiDeepProgress.total) * 100 : 0}%` }}
                       />
                     </div>

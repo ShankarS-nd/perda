@@ -649,7 +649,7 @@ export default function DeviceLogs() {
           >
             <table className="w-full text-xs font-[family-name:var(--font-geist-mono)]">
               <thead className="sticky top-0 z-10 bg-[#0d0f18] border-b border-white/[0.06]">
-                <tr className="text-left text-[10px] text-gray-600 uppercase tracking-wider">
+                <tr className="text-left text-[11px] text-gray-500">
                   <th className="px-3 py-2 w-[160px]">Timestamp</th>
                   <th className="px-2 py-2 w-[110px]">Service</th>
                   <th className="px-2 py-2 w-[56px]">Level</th>

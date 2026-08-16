@@ -55,6 +55,19 @@ interface ScriptRunnerProps {
 // Component
 // ---------------------------------------------------------------------------
 
+/** `device_list` → `Device list`. Acronyms the CLI uses stay upright. */
+const ARG_ACRONYMS = new Set(["id", "ids", "url", "urls", "ip", "os", "tc", "vod", "api", "aws", "csv", "json"]);
+
+function humanizeArg(name: string): string {
+  const words = name.replace(/[_-]+/g, " ").trim().split(/\s+/);
+  return words
+    .map((w, i) => {
+      if (ARG_ACRONYMS.has(w.toLowerCase())) return w.toUpperCase();
+      return i === 0 ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase();
+    })
+    .join(" ");
+}
+
 export default function ScriptRunner({
   scripts,
   selectedScript,
@@ -278,12 +291,12 @@ export default function ScriptRunner({
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center">
         <div className="relative mb-6">
-          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 border border-indigo-500/10">
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/[0.04] border border-white/[0.07]">
             <svg className="h-9 w-9 text-indigo-400/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
             </svg>
           </div>
-          <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10 flex items-center justify-center">
+          <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center">
             <svg className="h-3 w-3 text-indigo-400/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59" />
             </svg>
@@ -300,12 +313,12 @@ export default function ScriptRunner({
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
       {/* Script Header */}
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 border border-indigo-500/10">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] border border-white/[0.07]">
               <svg className="h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
               </svg>
@@ -383,17 +396,22 @@ export default function ScriptRunner({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {selectedScript.args.map((arg) => (
                 <div key={arg.name} className="space-y-1.5">
-                  <label className="ds-label flex items-baseline gap-2">
-                    {arg.name}
-                    <span className="font-normal normal-case text-gray-600">
-                      ({arg.type})
+                  {/* The backend names these in snake_case; a person reading
+                      the form should not have to. Type and requiredness move
+                      to a quiet trailing hint instead of parenthetical noise. */}
+                  {/* Not .ds-label here: that class sets display:block and is
+                      declared after @tailwind utilities, so it beats `flex`
+                      and collapses the row. Compose the styles directly. */}
+                  <label className="flex items-baseline gap-2 mb-1">
+                    <span className="text-[12px] font-medium text-gray-200">
+                      {humanizeArg(arg.name)}
                     </span>
-                    {arg.required && (
-                      <span className="text-red-400 text-[10px]">*</span>
-                    )}
+                    <span className="ml-auto font-mono text-[11px] text-gray-600">
+                      {arg.type}
+                    </span>
                   </label>
                   {arg.description && (
-                    <p className="text-[11px] text-gray-500 leading-relaxed">{arg.description}</p>
+                    <p className="text-[12px] text-gray-500 leading-relaxed">{arg.description}</p>
                   )}
                   {arg.type === "bool" ? (
                     <button
