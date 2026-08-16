@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  LineChart,
-  Line,
+  BarChart,
+  Bar,
+  LabelList,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
@@ -654,25 +654,8 @@ export default function TestReportDashboard() {
 
   // ── Render ──
   return (
-    <div className="max-w-[1400px] mx-auto">
-      {/* ── Header ── */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-1.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10">
-            <svg className="h-[18px] w-[18px] text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="text-[22px] font-semibold text-white tracking-tight leading-tight">
-              Test Report Summary
-            </h1>
-            <p className="text-[13px] text-gray-500 leading-tight">
-              Compare Jenkins builds and view categorized test results
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className="w-full">
+      
 
       {/* ══════════════════════════════════════════════════════════ */}
       {/* Input Card                                                */}
@@ -720,10 +703,10 @@ export default function TestReportDashboard() {
         </div>
 
         {/* ── 2-column grid: Row 1 ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-5 mb-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-5 mb-5">
           {/* Device Type */}
           <div className="space-y-2">
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Device Type</label>
+            <label className="ds-label">Device Type</label>
             <select
               value={platform}
               onChange={(e) => setPlatform(e.target.value)}
@@ -738,7 +721,7 @@ export default function TestReportDashboard() {
 
           {/* Quick Select */}
           <div className="space-y-2">
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Quick Select</label>
+            <label className="ds-label">Quick Select</label>
             <select
               value={selectedPreset}
               onChange={(e) => handlePresetChange(e.target.value)}
@@ -759,7 +742,7 @@ export default function TestReportDashboard() {
 
           {/* Previous Build # */}
           <div className="space-y-2">
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+            <label className="ds-label">
               Previous Build #{useUrls && <span className="text-gray-600 normal-case"> (optional with URL)</span>}
             </label>
             <input
@@ -773,7 +756,7 @@ export default function TestReportDashboard() {
 
           {/* Current Build # */}
           <div className="space-y-2">
-            <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+            <label className="ds-label">
               Current Build #{useUrls && <span className="text-gray-600 normal-case"> (optional with URL)</span>}
             </label>
             <input
@@ -786,27 +769,12 @@ export default function TestReportDashboard() {
           </div>
         </div>
 
-        {/* ── Direct URL toggle ── */}
-        <div className="mt-5 mb-5">
-          <button
-            type="button"
-            onClick={() => setUseUrls(!useUrls)}
-            className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-300 transition-colors"
-          >
-            <div className={`relative w-8 h-[18px] rounded-full transition-colors ${useUrls ? "bg-indigo-500/40" : "bg-white/10"}`}>
-              <div className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all ${useUrls ? "left-[16px]" : "left-[2px]"}`} />
-            </div>
-            <span>Use Direct Jenkins URLs</span>
-            {useUrls && <span className="text-gray-600 text-[10px]">(URLs override build numbers)</span>}
-          </button>
-        </div>
-
         {/* ── URL inputs (collapsible) ── */}
         {useUrls && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-5 mb-5 animate-in fade-in duration-200">
             {/* Previous Build URL */}
             <div className="space-y-2">
-              <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Previous Build URL</label>
+              <label className="ds-label">Previous Build URL</label>
               <input
                 type="text"
                 value={rc1Url}
@@ -818,7 +786,7 @@ export default function TestReportDashboard() {
 
             {/* Current Build URL */}
             <div className="space-y-2">
-              <label className="block text-[11px] font-medium text-gray-500 uppercase tracking-wider">Current Build URL</label>
+              <label className="ds-label">Current Build URL</label>
               <input
                 type="text"
                 value={rc2Url}
@@ -830,8 +798,24 @@ export default function TestReportDashboard() {
           </div>
         )}
 
-        {/* ── Generate button row ── */}
-        <div className="flex justify-end gap-3 pt-1">
+        {/* ── Footer: option toggle and actions share one row, so the
+               card ends on content instead of an empty band. ── */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => setUseUrls(!useUrls)}
+            role="switch"
+            aria-checked={useUrls}
+            className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-300 transition-colors duration-150"
+          >
+            <span className={`relative w-8 h-[18px] rounded-full transition-colors duration-150 ${useUrls ? "bg-indigo-500/50" : "bg-white/10"}`}>
+              <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-[left] duration-150 ease-out ${useUrls ? "left-[16px]" : "left-[2px]"}`} />
+            </span>
+            <span>Use Direct Jenkins URLs</span>
+            {useUrls && <span className="text-gray-600 text-[10px]">(URLs override build numbers)</span>}
+          </button>
+
+          <div className="flex items-center gap-3">
           {data && !loading && (
             <button
               onClick={() => fetchReport(true)}
@@ -863,6 +847,7 @@ export default function TestReportDashboard() {
               </>
             )}
           </button>
+          </div>
         </div>
 
         {/* Error message */}
@@ -879,7 +864,7 @@ export default function TestReportDashboard() {
         {showSyncPanel && (
           <div className="mt-4 rounded-[10px] bg-[#12141c] border border-white/[0.06] p-4">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Preset Report Cache</span>
+              <span className="text-[13px] font-semibold text-gray-200 tracking-[-0.005em]">Preset Report Cache</span>
               {!seeding && (
                 <button
                   onClick={() => setShowSyncPanel(false)}
@@ -927,7 +912,7 @@ export default function TestReportDashboard() {
 
       {/* ── Loading state ── */}
       {loading && (
-        <div className="flex flex-col items-center justify-center py-24 gap-5">
+        <div className="ds-empty">
           <div className="relative">
             <div className="h-12 w-12 rounded-full border-2 border-indigo-500/20 border-t-indigo-500 animate-spin" />
             <div className="absolute inset-0 flex items-center justify-center">
@@ -976,9 +961,19 @@ export default function TestReportDashboard() {
             </div>
           </div>
 
+          {/* ── Verdict: the one question the page has to answer first ── */}
+          <VerdictStrip
+            prev={data.rc1_overview}
+            curr={data.overview}
+            rc1={data.rc1}
+            rc2={data.rc2}
+            regressions={data.regressions.known_count + data.regressions.unknown_count}
+            fixed={data.fixed_tcs?.count ?? 0}
+          />
+
           {/* ── SECTION 0: Previous Build Overview (compact) ── */}
           <div>
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3">
               Previous Build Overview
               <span className="ml-2 text-xs font-normal text-gray-600">Build #{data.rc1}{data.rc1_ota ? ` (${data.rc1_ota})` : ""}</span>
             </h2>
@@ -1039,7 +1034,7 @@ export default function TestReportDashboard() {
 
           {/* ── SECTION 1: Overall Summary Boxes ── */}
           <div>
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3">
               Current Build Overview
               <span className="ml-2 text-xs font-normal text-gray-600">Build #{data.rc2}{data.rc2_ota ? ` (${data.rc2_ota})` : ""}</span>
             </h2>
@@ -1100,7 +1095,7 @@ export default function TestReportDashboard() {
             {/* New / Removed TCs boxes */}
             {((data.new_tcs?.count ?? 0) > 0 || (data.removed_tcs?.count ?? 0) > 0) && (
               <div className="mt-4">
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Test Case Changes</h3>
+                <h3 className="text-[13px] font-semibold text-gray-300 tracking-[-0.005em] mb-2">Test Case Changes</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <MetricBox
                     label="New Test Cases"
@@ -1138,7 +1133,7 @@ export default function TestReportDashboard() {
 
           {/* ── SECTION 2: Regression Boxes ── */}
           <div>
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3">
               Regressions (Pass → Fail)
             </h2>
             <div className="grid grid-cols-2 gap-4">
@@ -1195,7 +1190,7 @@ export default function TestReportDashboard() {
           {/* ── SECTION 2B: Persistent Failures (Fail → Fail) ── */}
           {data.persistent_failures && (data.persistent_failures.known_count > 0 || data.persistent_failures.unknown_count > 0) && (
             <div>
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+              <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3">
                 Persistent Failures (Fail → Fail)
               </h2>
               <div className="grid grid-cols-2 gap-4">
@@ -1241,7 +1236,7 @@ export default function TestReportDashboard() {
           {/* ── SECTION 2C: Stable Test Cases (Pass → Pass) ── */}
           {data.stable_tcs && data.stable_tcs.count > 0 && (
             <div>
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+              <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3">
                 Stable Test Cases (Pass → Pass)
               </h2>
               <div className="grid grid-cols-1 gap-4">
@@ -1271,7 +1266,7 @@ export default function TestReportDashboard() {
           {/* ── SECTION 2D: Fixed Test Cases (Fail → Pass) ── */}
           {data.fixed_tcs && data.fixed_tcs.count > 0 && (
             <div>
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+              <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3">
                 Fixed Test Cases (Fail → Pass)
               </h2>
               <div className="grid grid-cols-1 gap-4">
@@ -1300,29 +1295,43 @@ export default function TestReportDashboard() {
 
           {/* ── SECTION 3: Graphs ── */}
           <div>
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3">
               Failure Distribution by Service
             </h2>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <GraphCard
-                title="Known Failures per Service"
-                data={data.graphs.known}
-                color="#f59e0b"
-                gradientId="knownGrad"
-              />
-              <GraphCard
-                title="Unknown Failures per Service"
-                data={data.graphs.unknown}
-                color="#ef4444"
-                gradientId="unknownGrad"
-              />
+              {(() => {
+                /* One x-domain across both cards. Drawn independently, a peak of
+                   17 known failures and a peak of 5 unknown ones filled the same
+                   width and read as equally bad. */
+                const domainMax = Math.max(
+                  ...data.graphs.known.map((d) => d.count),
+                  ...data.graphs.unknown.map((d) => d.count),
+                  1
+                );
+                return (
+                  <>
+                    <GraphCard
+                      title="Known failures per service"
+                      data={data.graphs.known}
+                      color="#f59e0b"
+                      domainMax={domainMax}
+                    />
+                    <GraphCard
+                      title="Unknown failures per service"
+                      data={data.graphs.unknown}
+                      color="#ef4444"
+                      domainMax={domainMax}
+                    />
+                  </>
+                );
+              })()}
             </div>
           </div>
 
           {/* ── SECTION 4: Unique Services ── */}
           {data.unique_services && (Object.keys(data.unique_services.only_in_rc1).length > 0 || Object.keys(data.unique_services.only_in_rc2).length > 0) && (
             <div>
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <h2 className="text-[15px] font-semibold text-gray-200 tracking-[-0.01em] mb-3 flex items-center gap-2">
                 <svg className="h-4 w-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                 </svg>
@@ -1333,7 +1342,7 @@ export default function TestReportDashboard() {
                 {Object.keys(data.unique_services.only_in_rc1).length > 0 && (
                   <div className="rounded-xl border border-white/[0.06] bg-[#1a1d28] p-5">
                     <div className="flex items-center gap-2 mb-4">
-                      <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Only in Build {data.rc1}</span>
+                      <span className="text-[13px] font-semibold text-blue-300 tracking-[-0.005em]">Only in Build {data.rc1}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/10 font-medium">
                         {Object.keys(data.unique_services.only_in_rc1).length} service{Object.keys(data.unique_services.only_in_rc1).length !== 1 ? "s" : ""}
                       </span>
@@ -1349,7 +1358,7 @@ export default function TestReportDashboard() {
                 {Object.keys(data.unique_services.only_in_rc2).length > 0 && (
                   <div className="rounded-xl border border-white/[0.06] bg-[#1a1d28] p-5">
                     <div className="flex items-center gap-2 mb-4">
-                      <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">Only in Build {data.rc2}</span>
+                      <span className="text-[13px] font-semibold text-cyan-300 tracking-[-0.005em]">Only in Build {data.rc2}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/10 font-medium">
                         {Object.keys(data.unique_services.only_in_rc2).length} service{Object.keys(data.unique_services.only_in_rc2).length !== 1 ? "s" : ""}
                       </span>
@@ -1369,14 +1378,14 @@ export default function TestReportDashboard() {
 
       {/* ── Empty state ── */}
       {!data && !loading && !error && (
-        <div className="flex flex-col items-center justify-center py-28 text-center">
+        <div className="ds-empty">
           <div className="relative mb-6">
-            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 border border-indigo-500/10">
+            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/[0.04] border border-white/[0.07]">
               <svg className="h-9 w-9 text-indigo-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </div>
-            <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10 flex items-center justify-center">
+            <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center">
               <svg className="h-3 w-3 text-indigo-400/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
@@ -1527,7 +1536,7 @@ function MetricBox({
       <div className={`flex ${hasBadges ? "items-stretch" : ""}`}>
         {/* Left side — main metric */}
         <div className="flex-1 p-5 min-w-0">
-          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+          <p className="text-[12px] font-medium text-gray-400 mb-1.5">
             {label}
           </p>
           <div className="flex items-baseline gap-2">
@@ -1603,7 +1612,7 @@ function ServiceDrillDown({
           {entries.length} services — Click a service to view test cases
         </p>
       </div>
-      <div className="divide-y divide-white/[0.03] max-h-[400px] overflow-y-auto scrollbar-thin">
+      <div className="divide-y divide-white/[0.03] overflow-y-auto scrollbar-thin max-h-[min(560px,calc(100vh-340px))]">
         {entries.map(([svc, tcs]) => (
           <div key={svc}>
             <button
@@ -1981,7 +1990,7 @@ function ServiceList({
   const textC = isTimeout ? "text-yellow-400" : c.text;
 
   return (
-    <div className="divide-y divide-white/[0.03] max-h-[400px] overflow-y-auto scrollbar-thin">
+    <div className="divide-y divide-white/[0.03] overflow-y-auto scrollbar-thin max-h-[min(560px,calc(100vh-340px))]">
       {entries.map(([svc, tcs]) => (
         <div key={svc}>
           <button
@@ -2067,76 +2076,271 @@ function ServiceList({
   );
 }
 
+/* --- Verdict Strip ---------------------------------------------------------
+ *
+ * The report opened with two identical 4-tile rows, 175px apart, and left the
+ * reader to diff them by memory. Worse, the two builds rarely execute the same
+ * number of cases, so raw counts lie: in a real comparison pass fell 687 → 618
+ * while the pass *rate* actually rose 84.2% → 85.5%.
+ *
+ * So the movement is expressed in percentage points, which is comparable across
+ * differing denominators, with the raw counts kept as secondary text.
+ * ------------------------------------------------------------------------- */
+
+function DeltaTile({
+  label, prevPct, currPct, prevCount, currCount, goodDirection,
+}: {
+  label: string;
+  prevPct: number;
+  currPct: number;
+  prevCount: number;
+  currCount: number;
+  goodDirection: "up" | "down";
+}) {
+  const dPct = Math.round((currPct - prevPct) * 10) / 10;
+  const dCount = currCount - prevCount;
+  const flat = Math.abs(dPct) < 0.05;
+  const improved = goodDirection === "up" ? dPct > 0 : dPct < 0;
+  const tone = flat ? "flat" : improved ? "good" : "bad";
+
+  const ink = {
+    good: "text-emerald-400",
+    bad: "text-red-400",
+    flat: "text-gray-500",
+  }[tone];
+
+  return (
+    <div className="flex flex-col gap-1.5 px-4 py-3.5 first:pl-0">
+      <span className="ds-label !mb-0">{label}</span>
+      <div className={`flex items-baseline gap-1.5 ${ink}`}>
+        <span className="text-[26px] font-semibold leading-none tracking-tight">
+          {flat ? "±0" : `${dPct > 0 ? "+" : "−"}${Math.abs(dPct).toFixed(1)}`}
+        </span>
+        <span className="text-xs font-medium opacity-80">pp</span>
+      </div>
+      <span className="text-[11px] text-gray-600 tabular-nums">
+        {prevPct.toFixed(1)}% → {currPct.toFixed(1)}%
+        <span className="text-gray-700">
+          {"  ·  "}{prevCount}→{currCount}
+          {dCount !== 0 && ` (${dCount > 0 ? "+" : "−"}${Math.abs(dCount)})`}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function VerdictStrip({
+  prev, curr, rc1, rc2, regressions, fixed,
+}: {
+  prev: Overview;
+  curr: Overview;
+  rc1: string;
+  rc2: string;
+  regressions: number;
+  fixed: number;
+}) {
+  const dPass = Math.round((curr.pass_pct - prev.pass_pct) * 10) / 10;
+  const net = fixed - regressions;
+  const verdict =
+    Math.abs(dPass) < 0.05 && net === 0
+      ? { text: "Holding steady", tone: "flat" as const }
+      : dPass > 0 && net >= 0
+        ? { text: "Better than the previous build", tone: "good" as const }
+        : dPass < 0 && net < 0
+          ? { text: "Worse than the previous build", tone: "bad" as const }
+          : { text: "Mixed — pass rate and regressions disagree", tone: "warn" as const };
+
+  const dot = {
+    good: "bg-emerald-400", bad: "bg-red-400",
+    warn: "bg-amber-400", flat: "bg-gray-500",
+  }[verdict.tone];
+  const ink = {
+    good: "text-emerald-300", bad: "text-red-300",
+    warn: "text-amber-300", flat: "text-gray-300",
+  }[verdict.tone];
+
+  /* Counts are only comparable when both builds ran the same number of cases. */
+  const sameDenominator = prev.total === curr.total;
+
+  return (
+    <div className="ds-card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-white/[0.05]">
+        <div className="flex items-center gap-2.5">
+          <span className={`h-2 w-2 rounded-full ${dot}`} />
+          <span className={`text-sm font-semibold ${ink}`}>{verdict.text}</span>
+          <span className="text-xs text-gray-600">
+            #{rc2} vs #{rc1}
+          </span>
+        </div>
+        <div className="flex items-center gap-4 text-xs">
+          <span className="text-gray-500">
+            <span className="text-red-400 font-semibold tabular-nums">{regressions}</span> regressed
+          </span>
+          <span className="text-gray-500">
+            <span className="text-emerald-400 font-semibold tabular-nums">{fixed}</span> fixed
+          </span>
+          <span className={`font-semibold tabular-nums ${net > 0 ? "text-emerald-400" : net < 0 ? "text-red-400" : "text-gray-500"}`}>
+            net {net > 0 ? "+" : net < 0 ? "−" : "±"}{Math.abs(net)}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-white/[0.05] px-5 py-1">
+        <DeltaTile label="Pass rate" goodDirection="up"
+          prevPct={prev.pass_pct} currPct={curr.pass_pct}
+          prevCount={prev.pass} currCount={curr.pass} />
+        <DeltaTile label="Known failures" goodDirection="down"
+          prevPct={prev.known_pct} currPct={curr.known_pct}
+          prevCount={prev.known_failures} currCount={curr.known_failures} />
+        <DeltaTile label="Unknown failures" goodDirection="down"
+          prevPct={prev.unknown_pct} currPct={curr.unknown_pct}
+          prevCount={prev.unknown_failures} currCount={curr.unknown_failures} />
+        <DeltaTile label="Not executed" goodDirection="down"
+          prevPct={prev.ne_pct} currPct={curr.ne_pct}
+          prevCount={prev.not_executed} currCount={curr.not_executed} />
+      </div>
+
+      {!sameDenominator && (
+        <p className="px-5 pb-3.5 pt-1 text-[11px] text-gray-600">
+          These builds ran different numbers of cases
+          <span className="tabular-nums"> ({prev.total} vs {curr.total})</span>, so
+          percentage points compare fairly where raw counts do not.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // --- Graph Card ---
+
+/**
+ * Failure counts per service.
+ *
+ * This was a line chart. A line implies continuity between adjacent points, but
+ * the x-axis here is a list of unrelated service names — the slope between
+ * AWSIOT and BAGHEERA means nothing. It also forced 45°-rotated labels that
+ * collided and clipped.
+ *
+ * Ranked horizontal bars fit the actual job (compare magnitude, identify the
+ * worst offender): names read straight across at full length, and sorting puts
+ * the answer at the top. Both cards share one x-domain so a spike of 17 and a
+ * spike of 5 are not drawn the same width.
+ */
+const MAX_BARS = 12;
 
 function GraphCard({
   title,
   data,
   color,
-  gradientId,
+  domainMax,
 }: {
   title: string;
   data: GraphPoint[];
   color: string;
-  gradientId: string;
+  domainMax: number;
 }) {
-  // Filter out zero-count services for cleaner graphs
-  const filtered = data.filter((d) => d.count > 0);
-  const maxCount = Math.max(...filtered.map((d) => d.count), 1);
+  const ranked = data
+    .filter((d) => d.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const shown = ranked.slice(0, MAX_BARS);
+  const hidden = ranked.length - shown.length;
+  const total = ranked.reduce((sum, d) => sum + d.count, 0);
+
+  // Grow the card with the data instead of cramming rows into a fixed height.
+  const chartHeight = Math.max(shown.length * 30 + 16, 120);
+
+  // Reserve the gutter the longest visible name actually needs. Measured at
+  // 11px: these all-caps service names run up to 6.9px per character
+  // (BAGHEERA-ENHANCED-PRIVACY = 166px), so budget 6.95 plus tick padding.
+  const longest = shown.reduce((n, d) => Math.max(n, d.service.length), 0);
+  const labelWidth = Math.min(Math.max(Math.ceil(longest * 6.95) + 20, 110), 245);
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-[#1a1d28] p-6 shadow-lg shadow-black/10 transition-shadow duration-300 hover:shadow-xl hover:shadow-black/15">
-      <h3 className="text-sm font-semibold text-gray-300 mb-5">{title}</h3>
-      {filtered.length === 0 ? (
-        <div className="flex items-center justify-center h-[260px] text-sm text-gray-600">
+    <div className="ds-card p-6">
+      <div className="mb-5 flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-semibold text-gray-300">{title}</h3>
+        {ranked.length > 0 && (
+          <span className="text-xs text-gray-500 tabular-nums">
+            {total} across {ranked.length} service{ranked.length === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+
+      {shown.length === 0 ? (
+        <div className="flex h-[120px] items-center justify-center text-sm text-gray-600">
           No failures to display
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={filtered} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#3e4656" />
-            <XAxis
-              dataKey="service"
-              tick={{ fill: "#6b7280", fontSize: 10 }}
-              angle={-45}
-              textAnchor="end"
-              interval={0}
-              height={60}
-            />
-            <YAxis
-              tick={{ fill: "#6b7280", fontSize: 11 }}
-              allowDecimals={false}
-              domain={[0, Math.ceil(maxCount * 1.1)]}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#343b4a",
-                border: "1px solid #4c5466",
-                borderRadius: "8px",
-                fontSize: "12px",
-                color: "#e5e7eb",
-              }}
-              labelStyle={{ color: "#949cad", fontWeight: 600 }}
-            />
-            <Legend wrapperStyle={{ fontSize: "11px", color: "#949cad" }} />
-            <Line
-              type="monotone"
-              dataKey="count"
-              stroke={color}
-              strokeWidth={2.5}
-              dot={{ r: 4, fill: color, strokeWidth: 0 }}
-              activeDot={{ r: 6, fill: color }}
-              name="Failure Count"
-              fill={`url(#${gradientId})`}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <>
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <BarChart
+              data={shown}
+              layout="vertical"
+              margin={{ top: 0, right: 34, left: 0, bottom: 0 }}
+              barCategoryGap={6}
+            >
+              {/* Solid hairline, vertical only — a dashed grid reads as a
+                  threshold when it is just a ruler. */}
+              <CartesianGrid
+                horizontal={false}
+                stroke="rgba(255,255,255,0.055)"
+              />
+              <XAxis
+                type="number"
+                domain={[0, domainMax]}
+                allowDecimals={false}
+                tick={{ fill: "#6b7280", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                height={20}
+              />
+              <YAxis
+                type="category"
+                dataKey="service"
+                /* Sized to the longest label actually present, so names like
+                   BAGHEERA-ENHANCED-PRIVACY are not cropped to …ENHANCED. */
+                width={labelWidth}
+                tick={{ fill: "#949cad", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+                interval={0}
+              />
+              <Tooltip
+                cursor={{ fill: "rgba(255,255,255,0.035)" }}
+                contentStyle={{
+                  backgroundColor: "#1a1d28",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: "10px",
+                  fontSize: "12px",
+                  color: "#e5e7eb",
+                  boxShadow: "0 8px 28px rgba(6,8,14,0.5)",
+                }}
+                labelStyle={{ color: "#949cad", fontWeight: 600 }}
+                formatter={(v) => [v as number, "Failures"]}
+              />
+              {/* Single series — the card title names it, so no legend box. */}
+              <Bar
+                dataKey="count"
+                fill={color}
+                radius={[0, 4, 4, 0]}
+                maxBarSize={16}
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="count"
+                  position="right"
+                  offset={8}
+                  style={{ fill: "#a2aabd", fontSize: 11 }}
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+          {hidden > 0 && (
+            <p className="mt-3 text-xs text-gray-600">
+              +{hidden} more service{hidden === 1 ? "" : "s"} with fewer failures
+            </p>
+          )}
+        </>
       )}
     </div>
   );
