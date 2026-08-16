@@ -49,19 +49,22 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 interface PageMeta {
   key: Page;
   label: string;
+  /** Shown beside the title in the top bar — each page used to repeat this
+      in a ~120px header block that duplicated the breadcrumb below it. */
+  description?: string;
   shortcut?: string;
   icon: () => JSX.Element;
   section?: string;
 }
 
 const PAGE_META: PageMeta[] = [
-  { key: "scripts", label: "Scripts", shortcut: "1", icon: ScriptsIcon, section: "Core" },
-  { key: "test-report", label: "Test Report Summary", shortcut: "2", icon: TestReportIcon, section: "Core" },
-  { key: "confidence", label: "TC Confidence", shortcut: "3", icon: ConfidenceIcon, section: "Core" },
-  { key: "tc-analysis", label: "TC Analysis", shortcut: "4", icon: TCAnalysisIcon, section: "Core" },
-  { key: "history", label: "History", shortcut: "5", icon: HistoryIcon, section: "Core" },
-  { key: "workflows", label: "Workflow Builder", shortcut: "6", icon: WorkflowIcon, section: "Workflows" },
-  { key: "workflow-runs", label: "Workflow Runs", shortcut: "7", icon: WorkflowRunsIcon, section: "Workflows" },
+  { key: "scripts", label: "Scripts", description: "Run automation scripts and stream their output", shortcut: "1", icon: ScriptsIcon, section: "Core" },
+  { key: "test-report", label: "Test Report Summary", description: "Compare two Jenkins builds", shortcut: "2", icon: TestReportIcon, section: "Core" },
+  { key: "confidence", label: "TC Confidence", description: "Pass-rate across multiple builds", shortcut: "3", icon: ConfidenceIcon, section: "Core" },
+  { key: "tc-analysis", label: "TC Analysis", description: "Automation logs for a single test case", shortcut: "4", icon: TCAnalysisIcon, section: "Core" },
+  { key: "history", label: "History", description: "Past script executions and their logs", shortcut: "5", icon: HistoryIcon, section: "Core" },
+  { key: "workflows", label: "Workflow Builder", description: "Compose multi-step automations", shortcut: "6", icon: WorkflowIcon, section: "Workflows" },
+  { key: "workflow-runs", label: "Workflow Runs", description: "Executions of saved workflows", shortcut: "7", icon: WorkflowRunsIcon, section: "Workflows" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -229,7 +232,7 @@ export default function Home() {
         <div className="px-4 py-4 border-b border-white/[0.06]">
           <div className="flex items-center gap-3 justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-white/[0.05] border border-white/[0.08]">
                 <svg
                   className="h-4 w-4 text-indigo-400"
                   fill="none"
@@ -539,28 +542,20 @@ export default function Home() {
       {/* ---------------------------------------------------------------- */}
       <main className="flex-1 flex flex-col overflow-hidden bg-[#0f1117] animated-bg">
         {/* Top Header Bar */}
-        <header className="top-header shrink-0 px-6 lg:px-8 flex items-center justify-between h-[52px] z-10">
-          <div className="flex items-center gap-3">
-            {/* Breadcrumb */}
-            <nav className="flex items-center gap-1.5 text-sm">
-              <span className="text-gray-500">Perda</span>
-              <svg
-                className="h-3 w-3 text-gray-700"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                />
-              </svg>
-              <span className="text-gray-200 font-medium">
-                {activePageMeta?.label ?? "Scripts"}
-              </span>
-            </nav>
+        {/* The title lives here, not in a header block on each page. The
+            breadcrumb this replaced said "Perda › Scripts" — one level of a
+            hierarchy that does not exist, above a page that then repeated its
+            own name in 25px type. */}
+        <header className="top-header shrink-0 px-6 lg:px-8 flex items-center justify-between h-[54px] z-10">
+          <div className="flex items-baseline gap-3 min-w-0">
+            <h1 className="text-[15px] font-semibold text-gray-100 tracking-[-0.011em] truncate">
+              {activePageMeta?.label ?? "Scripts"}
+            </h1>
+            {activePageMeta?.description && (
+              <p className="hidden lg:block text-[13px] text-gray-600 truncate">
+                {activePageMeta.description}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -616,18 +611,24 @@ export default function Home() {
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto main-content relative z-[1]">
+          {/* One measure for every page. Each screen used to set its own
+              max-width (896 / 1024 / 1400 / 1600px), so the content column
+              visibly resized when switching tabs. A single container keeps
+              the left edge fixed — the eye never has to re-find it. */}
           <div
-            className={`${
-              activePage === "workflows" ? "p-4" : "p-6 lg:p-8 xl:p-10"
-            }`}
+            className={
+              activePage === "workflows"
+                ? "p-4"
+                : "px-6 lg:px-8 xl:px-10 py-6 lg:py-8 mx-auto w-full max-w-[1440px]"
+            }
           >
             <AnimatePresence mode="wait">
               <motion.div
                 key={activePage}
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+                exit={{ opacity: 0, y: -3 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               >
                 {activePage === "scripts" && (
                   <ScriptRunner
@@ -942,18 +943,19 @@ function SidebarItem({
   shortcut,
   onClick,
 }: SidebarItemProps) {
+  // Surface and rail come from .sidebar-item-btn[data-active] in globals.css,
+  // so the selected row is a lit surface rather than a tinted border box.
   const base =
-    "sidebar-item-btn flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all duration-200 ripple-container";
-  const activeClass =
-    "bg-indigo-500/10 text-indigo-300 border border-indigo-500/10 sidebar-active-glow";
-  const defaultClass =
-    "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200 border border-transparent";
-  const disabledClass =
-    "text-gray-600 cursor-not-allowed border border-transparent";
+    "sidebar-item-btn relative flex items-center gap-3 w-full text-left px-3 py-2 text-[13.5px] font-medium ripple-container";
+  const activeClass = "text-white sidebar-active-glow";
+  const defaultClass = "text-gray-400 hover:text-gray-100";
+  const disabledClass = "text-gray-600 cursor-not-allowed";
 
   const content = (
     <button
       className={`${base} ${active ? activeClass : disabled ? disabledClass : defaultClass}`}
+      data-active={active ? "true" : undefined}
+      aria-current={active ? "page" : undefined}
       disabled={disabled}
       onClick={onClick}
     >
