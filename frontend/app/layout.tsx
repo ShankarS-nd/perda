@@ -1,23 +1,21 @@
 import type { Metadata } from "next";
-import { Inter, Outfit } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
+const geistSans = localFont({
+  src: "./fonts/GeistVF.woff",
+  variable: "--font-geist-sans",
+  weight: "100 900",
 });
-
-const outfit = Outfit({
-  subsets: ["latin"],
-  variable: "--font-outfit",
-  display: "swap",
+const geistMono = localFont({
+  src: "./fonts/GeistMonoVF.woff",
+  variable: "--font-geist-mono",
+  weight: "100 900",
 });
 
 export const metadata: Metadata = {
-  title: "Perda Dashboard | Intelligent Automation Platform",
-  description: "A premium, modern automation and script execution platform for developers. Manage workflows, view logs, and analyze test cases with an intuitive dashboard.",
-  keywords: ["automation", "dashboard", "developer tools", "scripts"],
+  title: "Perda — Developer Toolkit",
+  description: "Developer Automation Platform",
 };
 
 export default function RootLayout({
@@ -35,7 +33,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${inter.variable} ${outfit.variable} font-sans antialiased bg-base-800 text-gray-50`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0f1117] text-gray-100`}
       >
         {children}
       </body>

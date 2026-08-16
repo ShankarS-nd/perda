@@ -213,28 +213,25 @@ export default function Home() {
   const SIDEBAR_MINI = 60;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-transparent">
-      <div className="ambient-bg" />
-      
-      <div className="flex h-full w-full p-3 sm:p-5 gap-3 sm:gap-5 relative z-10">
-        {/* ---------------------------------------------------------------- */}
-        {/* Sidebar                                                          */}
-        {/* ---------------------------------------------------------------- */}
-        <motion.aside
-          initial={false}
-          animate={{ width: sidebarCollapsed ? SIDEBAR_MINI : SIDEBAR_FULL }}
-          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-          className={`shrink-0 sidebar-glass rounded-2xl flex flex-col overflow-hidden ${
-            sidebarCollapsed ? "sidebar-mini" : ""
-          }`}
-        >
+    <div className="flex h-screen overflow-hidden">
+      {/* ---------------------------------------------------------------- */}
+      {/* Sidebar                                                          */}
+      {/* ---------------------------------------------------------------- */}
+      <motion.aside
+        initial={false}
+        animate={{ width: sidebarCollapsed ? SIDEBAR_MINI : SIDEBAR_FULL }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className={`shrink-0 border-r border-white/[0.06] bg-[#0c0e14] sidebar-glass flex flex-col overflow-hidden ${
+          sidebarCollapsed ? "sidebar-mini" : ""
+        }`}
+      >
         {/* Brand */}
         <div className="px-4 py-4 border-b border-white/[0.06]">
           <div className="flex items-center gap-3 justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-accent-cyan/20 to-accent-violet/20 border border-accent-cyan/10 shadow-[0_0_12px_rgba(6,182,212,0.15)]">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/10">
                 <svg
-                  className="h-4 w-4 text-accent-cyan"
+                  className="h-4 w-4 text-indigo-400"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -254,7 +251,7 @@ export default function Home() {
                   exit={{ opacity: 0 }}
                   className="min-w-0"
                 >
-                  <h1 className="text-[16px] font-display font-bold tracking-tight text-white truncate">
+                  <h1 className="text-sm font-semibold tracking-tight text-white truncate">
                     Perda
                   </h1>
                   <p className="text-[10px] text-gray-500 truncate">
@@ -356,16 +353,16 @@ export default function Home() {
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: i * 0.03, duration: 0.2 }}
                           onClick={() => handleScriptClick(s)}
-                          className={`group flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-[10px] text-[13px] font-medium transition-all duration-150 ripple-container ${
+                          className={`group flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-[10px] text-xs font-medium transition-all duration-150 ripple-container ${
                             selectedScript?.name === s.name
-                              ? "bg-accent-violet/10 text-accent-violet border border-accent-violet/10 shadow-[0_0_8px_rgba(139,92,246,0.1)]"
-                              : "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200 border border-transparent hover-scale"
+                              ? "bg-indigo-500/10 text-indigo-300 border border-indigo-500/10"
+                              : "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200 border border-transparent"
                           }`}
                         >
                           <span
                             className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold uppercase transition-colors ${
                               selectedScript?.name === s.name
-                                ? "bg-accent-violet/20 text-accent-violet"
+                                ? "bg-indigo-500/20 text-indigo-400"
                                 : "bg-white/[0.06] text-gray-500 group-hover:bg-white/[0.08] group-hover:text-gray-400"
                             }`}
                           >
@@ -474,12 +471,12 @@ export default function Home() {
         {/* Footer */}
         <div className="px-3 py-3 border-t border-white/[0.04] flex items-center justify-between">
           {!sidebarCollapsed && (
-            <span className="text-[10px] text-gray-500">v0.1.0</span>
+            <span className="text-[10px] text-gray-600">v0.1.0</span>
           )}
           <div className={`flex items-center gap-2 ${sidebarCollapsed ? "mx-auto" : ""}`}>
             <button
               onClick={toggleTheme}
-              className="p-1.5 rounded-lg hover:bg-white/[0.06] text-gray-400 hover:text-gray-200 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-white/[0.06] text-gray-500 hover:text-gray-300 transition-colors"
               title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
             >
               {theme === "dark" ? (
@@ -516,10 +513,10 @@ export default function Home() {
               <span
                 className={`flex h-2 w-2 rounded-full ${
                   backendStatus === "connected"
-                    ? "bg-green-500/80 shadow-[0_0_8px_rgba(34,197,94,0.5)]"
+                    ? "bg-green-500/80"
                     : backendStatus === "checking"
-                      ? "bg-yellow-500/80 animate-pulse shadow-[0_0_8px_rgba(234,179,8,0.5)]"
-                      : "bg-red-500/80 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+                      ? "bg-yellow-500/80 animate-pulse"
+                      : "bg-red-500/80"
                 }`}
                 title="Backend status"
               />
@@ -540,9 +537,9 @@ export default function Home() {
       {/* ---------------------------------------------------------------- */}
       {/* Main Panel                                                       */}
       {/* ---------------------------------------------------------------- */}
-      <main className="flex-1 flex flex-col overflow-hidden main-glass rounded-2xl relative">
+      <main className="flex-1 flex flex-col overflow-hidden bg-[#0f1117] animated-bg">
         {/* Top Header Bar */}
-        <header className="top-header shrink-0 px-6 lg:px-8 flex items-center justify-between h-[60px] z-10 border-b border-white/[0.04]">
+        <header className="top-header shrink-0 px-6 lg:px-8 flex items-center justify-between h-[52px] z-10">
           <div className="flex items-center gap-3">
             {/* Breadcrumb */}
             <nav className="flex items-center gap-1.5 text-sm">
@@ -619,36 +616,37 @@ export default function Home() {
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto main-content relative z-[1]">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activePage}
-              initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={{ opacity: 0, y: -10, filter: "blur(4px)" }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className={`${
-                activePage === "workflows" ? "p-4" : "p-6 lg:p-8 xl:p-10"
-              }`}
-            >
-              {activePage === "scripts" && (
-                <ScriptRunner
-                  scripts={scripts}
-                  selectedScript={selectedScript}
-                  onSelectScript={setSelectedScript}
-                />
-              )}
-              {activePage === "test-report" && <TestReportDashboard />}
-              {activePage === "confidence" && <ConfidenceDashboard />}
-              {activePage === "tc-analysis" && <TCAnalysis />}
-              {activePage === "history" && <RunHistory />}
-              {activePage === "workflows" && <WorkflowBuilder />}
-              {activePage === "workflow-runs" && <WorkflowExecution />}
-            </motion.div>
-          </AnimatePresence>
+          <div
+            className={`${
+              activePage === "workflows" ? "p-4" : "p-6 lg:p-8 xl:p-10"
+            }`}
+          >
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activePage}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {activePage === "scripts" && (
+                  <ScriptRunner
+                    scripts={scripts}
+                    selectedScript={selectedScript}
+                    onSelectScript={setSelectedScript}
+                  />
+                )}
+                {activePage === "test-report" && <TestReportDashboard />}
+                {activePage === "confidence" && <ConfidenceDashboard />}
+                {activePage === "tc-analysis" && <TCAnalysis />}
+                {activePage === "history" && <RunHistory />}
+                {activePage === "workflows" && <WorkflowBuilder />}
+                {activePage === "workflow-runs" && <WorkflowExecution />}
+              </motion.div>
+            </AnimatePresence>
+          </div>
         </div>
       </main>
-      </div>
-
 
       {/* ---------------------------------------------------------------- */}
       {/* Command Palette Overlay                                          */}

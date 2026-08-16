@@ -223,7 +223,7 @@ def _fetch_published_scrjs(build_number: str, session: requests.Session) -> str 
     url = f"{JENKINS_BASE_URL}/{build_number}/Test_5freport/static/scr.js"
     print(f"  ↓ Trying published report data: {url}")
     try:
-        resp = session.get(url, timeout=120, allow_redirects=False)
+        resp = session.get(url, timeout=180, allow_redirects=False)
     except requests.exceptions.TooManyRedirects:
         print(f"    ⚠ Redirect loop for build {build_number} (report likely doesn't exist), will try artifact…")
         return None
@@ -239,7 +239,7 @@ def _fetch_published_scrjs(build_number: str, session: requests.Session) -> str 
         return None
     if resp.status_code in (301, 302, 303, 307, 308):
         # Non-auth redirect — follow it manually once
-        resp = session.get(resp.headers.get("Location", url), timeout=120)
+        resp = session.get(resp.headers.get("Location", url), timeout=180)
         _check_auth(resp)
         if resp.status_code == 404:
             print("    ⚠ Published scr.js not found (404 after redirect), will try artifact…")
@@ -254,7 +254,7 @@ def _fetch_artifact_scrjs(build_number: str, session: requests.Session) -> str:
     url = f"{JENKINS_BASE_URL}/{build_number}/artifact/report/report.tar.gz"
     print(f"  ↓ Downloading artifact: {url}")
     try:
-        resp = session.get(url, timeout=60, stream=True, allow_redirects=False)
+        resp = session.get(url, timeout=300, stream=True, allow_redirects=False)
     except requests.exceptions.TooManyRedirects:
         sys.exit(
             f"❌ Build {build_number}: Report not available (Jenkins redirect loop). "
@@ -269,7 +269,7 @@ def _fetch_artifact_scrjs(build_number: str, session: requests.Session) -> str:
     _check_auth(resp)
     if resp.status_code in (301, 302, 303, 307, 308):
         # Follow non-auth redirects
-        resp = session.get(resp.headers.get("Location", url), timeout=60, stream=True)
+        resp = session.get(resp.headers.get("Location", url), timeout=300, stream=True)
         _check_auth(resp)
     if resp.status_code == 404:
         sys.exit(
@@ -389,7 +389,7 @@ def fetch_report_js_from_url(
     print(f"  ↓ Trying published report data: {pub_url}")
     js: str | None = None
     try:
-        resp = sess.get(pub_url, timeout=120, allow_redirects=not is_default_host)
+        resp = sess.get(pub_url, timeout=180, allow_redirects=not is_default_host)
         if is_default_host:
             if _is_auth_redirect(resp):
                 sys.exit(
@@ -401,7 +401,7 @@ def fetch_report_js_from_url(
             print(f"    ✓ Downloaded ({len(resp.content):,} bytes)")
             js = resp.text
         elif is_default_host and resp.status_code in (301, 302, 303, 307, 308):
-            resp2 = sess.get(resp.headers.get("Location", pub_url), timeout=120)
+            resp2 = sess.get(resp.headers.get("Location", pub_url), timeout=180)
             _check_auth(resp2)
             if resp2.status_code == 200:
                 js = resp2.text
@@ -413,13 +413,13 @@ def fetch_report_js_from_url(
         art_url = f"{job_base_url}/{build_number}/artifact/report/report.tar.gz"
         print(f"  ↓ Trying artifact: {art_url}")
         try:
-            resp = sess.get(art_url, timeout=60, stream=True, allow_redirects=not is_default_host)
+            resp = sess.get(art_url, timeout=300, stream=True, allow_redirects=not is_default_host)
             if is_default_host:
                 if _is_auth_redirect(resp):
                     sys.exit("❌ Jenkins auth failed (redirect to login).")
                 _check_auth(resp)
             if is_default_host and resp.status_code in (301, 302, 303, 307, 308):
-                resp = sess.get(resp.headers.get("Location", art_url), timeout=60, stream=True)
+                resp = sess.get(resp.headers.get("Location", art_url), timeout=300, stream=True)
                 _check_auth(resp)
             if resp.status_code == 404:
                 raise RuntimeError(
