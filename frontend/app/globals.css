@@ -8,6 +8,38 @@
    Borders: rgba(255,255,255,0.06) | Accent: indigo→violet
    ══════════════════════════════════════════════════════════════ */
 
+/* ── Motion scale ──────────────────────────────────────────────
+   One easing curve and three durations for the whole app, so every
+   surface decelerates identically and the UI reads as one system.
+   Motion is reserved for state changes; nothing animates at rest.
+   ────────────────────────────────────────────────────────────── */
+:root {
+  /* Decelerating curve — fast start, soft landing. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Symmetric curve for things that move and come back (toggles). */
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --dur-instant: 90ms;   /* colour / opacity only */
+  --dur-fast: 150ms;     /* hover, focus, small state flips */
+  --dur-base: 240ms;     /* panels, expansion, entrances */
+  --dur-slow: 340ms;     /* full page / route transitions */
+
+  /* Elevation — one shadow ramp, tinted to the app background
+     rather than pure black so cards sit in the surface, not on it. */
+  --shadow-1: 0 1px 2px rgba(6, 8, 14, 0.4);
+  --shadow-2: 0 2px 8px rgba(6, 8, 14, 0.45), 0 1px 2px rgba(6, 8, 14, 0.3);
+  --shadow-3: 0 8px 28px rgba(6, 8, 14, 0.5), 0 2px 8px rgba(6, 8, 14, 0.3);
+  --shadow-4: 0 24px 64px rgba(6, 8, 14, 0.6), 0 8px 20px rgba(6, 8, 14, 0.4);
+
+  /* Accent — the single primary-action colour for the whole app. */
+  --accent: #6366f1;
+  --accent-hi: #818cf8;
+  --accent-to: #7c3aed;
+
+  /* Reading measure for prose so descriptions never span the viewport. */
+  --measure: 78ch;
+}
+
 @layer base {
   html {
     font-size: 17px;
@@ -71,7 +103,7 @@ nav::-webkit-scrollbar-thumb:hover {
 .main-content::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 3px;
-  transition: background 0.2s;
+  transition: background var(--dur-fast) var(--ease);
 }
 .main-content:hover::-webkit-scrollbar-thumb {
   background: #2a2f3e;
@@ -128,26 +160,13 @@ nav::-webkit-scrollbar-thumb:hover {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-@keyframes pulse-border {
-  0%, 100% { border-color: rgba(99, 102, 241, 0.3); }
-  50% { border-color: rgba(99, 102, 241, 0.6); }
-}
 @keyframes pageEnter {
   from { opacity: 0; transform: translateY(8px) scale(0.995); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-@keyframes breathe {
-  0%, 100% { opacity: 0.4; }
-  50%      { opacity: 1; }
-}
 @keyframes ripple {
   0%   { transform: scale(0); opacity: 0.35; }
   100% { transform: scale(4); opacity: 0; }
-}
-@keyframes gradientShift {
-  0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
 }
 @keyframes toastSlideIn {
   from { opacity: 0; transform: translateX(100%) scale(0.95); }
@@ -157,38 +176,26 @@ nav::-webkit-scrollbar-thumb:hover {
   from { opacity: 1; transform: translateX(0) scale(1); }
   to   { opacity: 0; transform: translateX(100%) scale(0.95); }
 }
-@keyframes borderGlow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
-  50%      { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1); }
-}
-@keyframes skeletonPulse {
-  0%, 100% { opacity: 0.4; }
-  50%      { opacity: 0.8; }
-}
-@keyframes glowPulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(99, 102, 241, 0.4); }
-  50%      { box-shadow: 0 0 10px rgba(99, 102, 241, 0.7); }
-}
 .animate-fadeIn {
-  animation: fadeIn 0.35s ease-out;
+  animation: fadeIn var(--dur-base) var(--ease);
 }
 .animate-fadeInUp {
-  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: fadeInUp var(--dur-base) var(--ease);
 }
 .animate-fadeInScale {
-  animation: fadeInScale 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: fadeInScale var(--dur-base) var(--ease);
 }
 .animate-slideDown {
-  animation: slideDown 0.3s ease-out;
+  animation: slideDown var(--dur-base) var(--ease);
 }
 .animate-slideInRight {
-  animation: slideInRight 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: slideInRight var(--dur-base) var(--ease);
 }
 
 /* ── Stagger Animations for list items ── */
 .stagger-item {
   opacity: 0;
-  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: fadeInUp var(--dur-base) var(--ease) forwards;
 }
 .stagger-item:nth-child(1) { animation-delay: 0ms; }
 .stagger-item:nth-child(2) { animation-delay: 50ms; }
@@ -201,7 +208,7 @@ nav::-webkit-scrollbar-thumb:hover {
 
 /* ── Page Transitions ── */
 .page-enter {
-  animation: pageEnter 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: pageEnter var(--dur-slow) var(--ease) both;
 }
 
 /* ── Skeleton Loader ── */
@@ -235,17 +242,17 @@ html.light .skeleton {
 
 /* ── Hover Micro-interactions ── */
 .hover-lift {
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease;
+  transition: transform var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 .hover-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255,255,255,0.04);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-3), 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 .hover-scale {
-  transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform var(--dur-fast) var(--ease);
 }
 .hover-scale:hover {
-  transform: scale(1.015);
+  transform: scale(1.01);
 }
 .hover-glow:hover {
   box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2), 0 4px 16px rgba(99, 102, 241, 0.08);
@@ -297,8 +304,9 @@ html.light .sidebar-glass {
   bottom: 6px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: linear-gradient(180deg, #6366f1, #8b5cf6);
-  animation: glowPulse 2.5s ease-in-out infinite;
+  background: linear-gradient(180deg, var(--accent), #8b5cf6);
+  /* Static. A pulsing indicator competes with the content for attention
+     and never resolves — the bar marks position, it isn't an alert. */
 }
 
 /* ── Focus Ring (keyboard nav) ── */
@@ -323,61 +331,82 @@ html.light *:focus-visible {
   outline: none;
 }
 
-/* ── Design System: Cards ── */
+/* ── Design System: Cards ──────────────────────────────────────
+   Surfaces are lit from above: a 1px inner highlight on the top
+   edge and a darker hairline below. That single cue is what makes
+   a dark panel read as a raised object rather than a flat patch
+   of lighter paint, and it costs no extra colour.
+   ────────────────────────────────────────────────────────────── */
 .ds-card {
-  background: #1a1d28;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, #1c1f2b 0%, #191c26 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 14px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.12);
-  transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    var(--shadow-2);
+  transition: box-shadow var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease);
 }
 .ds-card:hover {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.15);
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    var(--shadow-3);
 }
 .ds-card-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  background: rgba(15, 17, 23, 0.5);
-  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  background: transparent;
+  padding: 13px 20px;
   border-radius: 14px 14px 0 0;
+}
+html.light .ds-card {
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 3px rgba(16, 24, 40, 0.06);
 }
 
 /* ── Design System: Inputs ── */
+/* Inputs are recessed — the inverse of the card's lit top edge, so a
+   field reads as carved into the surface rather than sitting on it. */
 .ds-input {
-  background: #12141c;
+  background: #10121a;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  padding: 10px 14px;
+  border-radius: 9px;
+  padding: 9px 13px;
   font-size: 14px;
-  color: #e5e7eb;
-  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+  color: #e8eaf0;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
   outline: none;
 }
 .ds-input::placeholder {
   color: #4b5563;
-  transition: color 0.2s;
+  transition: color var(--dur-fast) var(--ease);
 }
 .ds-input:hover:not(:focus) {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(18, 20, 28, 0.8);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 .ds-input:focus {
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1), 0 0 20px rgba(99, 102, 241, 0.05);
+  background: #12141d;
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    0 0 0 3px rgba(99, 102, 241, 0.16);
 }
 .ds-input:focus::placeholder {
   color: #6b7280;
 }
 
 /* ── Design System: Label ── */
+/* Field labels read as sentence case, not shouted.
+   39 of these sit on screen at once; in caps they compete with the
+   values they describe, and caps also kill word-shape recognition
+   at 11px. Slightly larger, slightly brighter, no transform. */
 .ds-label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7280;
-  margin-bottom: 6px;
+  letter-spacing: 0;
+  color: #8b93a7;
+  margin-bottom: 7px;
 }
 
 /* ── Design System: Primary Button ── */
@@ -391,44 +420,35 @@ html.light *:focus-visible {
   font-weight: 600;
   border-radius: 10px;
   color: #fff;
-  background: linear-gradient(135deg, #6366f1, #7c3aed);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255,255,255,0.1);
-  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  background: linear-gradient(135deg, var(--accent), var(--accent-to));
+  box-shadow: var(--shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  /* Explicit property list — never `all`. Animating `all` forces the
+     browser to watch every property, including layout-affecting ones. */
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
   position: relative;
   overflow: hidden;
 }
 .ds-btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #818cf8, #8b5cf6);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35), 0 0 24px rgba(99, 102, 241, 0.15), inset 0 1px 0 rgba(255,255,255,0.15);
-  transform: translateY(-2px);
+  background: linear-gradient(135deg, var(--accent-hi), #8b5cf6);
+  box-shadow: var(--shadow-3), 0 0 0 1px rgba(129, 140, 248, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  /* 1px, not 2px — at 2px the label visibly detaches from the cursor. */
+  transform: translateY(-1px);
 }
 .ds-btn-primary:active:not(:disabled) {
-  transform: scale(0.97) translateY(0);
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2);
+  transform: translateY(0) scale(0.985);
+  transition-duration: var(--dur-instant);
+  box-shadow: var(--shadow-1);
 }
 .ds-btn-primary:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
-}
-.ds-btn-primary::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    120deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.03) 40%,
-    rgba(255, 255, 255, 0.06) 50%,
-    rgba(255, 255, 255, 0.03) 60%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 3s ease-in-out infinite;
-}
-.ds-btn-primary:hover::after,
-.ds-btn-primary:disabled::after {
-  animation: none;
+  transform: none;
 }
 
 /* ── Design System: Secondary Button ── */
@@ -442,19 +462,28 @@ html.light *:focus-visible {
   font-weight: 500;
   border-radius: 10px;
   color: #d1d5db;
-  background: #1a1d28;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  background: linear-gradient(180deg, #212533 0%, #1c202b 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--shadow-1);
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .ds-btn-secondary:hover:not(:disabled) {
-  background: #22262f;
-  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, #272c3b 0%, #222632 100%);
+  border-color: rgba(255, 255, 255, 0.15);
   color: #fff;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), var(--shadow-2);
+}
+.ds-btn-secondary:active:not(:disabled) {
+  transform: scale(0.985);
+  transition-duration: var(--dur-instant);
 }
 .ds-btn-secondary:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -471,11 +500,20 @@ html.light *:focus-visible {
   color: #fca5a5;
   background: rgba(220, 38, 38, 0.12);
   border: 1px solid rgba(220, 38, 38, 0.2);
-  transition: all 0.2s ease;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .ds-btn-danger:hover:not(:disabled) {
   background: rgba(220, 38, 38, 0.2);
-  border-color: rgba(220, 38, 38, 0.3);
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #fecaca;
+}
+.ds-btn-danger:active:not(:disabled) {
+  transform: scale(0.985);
+  transition-duration: var(--dur-instant);
 }
 
 /* ── Design System: Modal ── */
@@ -489,7 +527,7 @@ html.light *:focus-visible {
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(8px);
   padding: 16px;
-  animation: fadeIn 0.2s ease-out;
+  animation: fadeIn var(--dur-fast) var(--ease);
 }
 .ds-modal {
   background: #1a1d28;
@@ -499,7 +537,7 @@ html.light *:focus-visible {
   width: 100%;
   display: flex;
   flex-direction: column;
-  animation: fadeInScale 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: fadeInScale var(--dur-base) var(--ease);
 }
 .ds-modal-header {
   display: flex;
@@ -510,26 +548,28 @@ html.light *:focus-visible {
 }
 
 /* ── Page Header ── */
+/* Display sizes get tighter tracking; small text gets looser.
+   Uniform tracking is what makes a type scale feel undesigned. */
 .ds-page-title {
-  font-size: 22px;
+  font-size: 25px;
   font-weight: 600;
-  color: #fff;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
+  color: #f2f4f8;
+  letter-spacing: -0.021em;
+  line-height: 1.15;
 }
 .ds-page-subtitle {
-  font-size: 13px;
-  color: #6b7280;
-  line-height: 1.3;
+  font-size: 13.5px;
+  color: #7d8598;
+  line-height: 1.45;
 }
 
 /* ── Section Header ── */
+/* Section headings: real headings now, not eyebrow labels. */
 .ds-section-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7280;
+  letter-spacing: -0.005em;
+  color: #b6bdcc;
 }
 
 /* ── Status Badges ── */
@@ -542,7 +582,10 @@ html.light *:focus-visible {
   font-weight: 600;
   border-radius: 9999px;
   border: 1px solid;
-  transition: all 0.2s ease;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .ds-badge-success { background: rgba(34, 197, 94, 0.1); color: #4ade80; border-color: rgba(34, 197, 94, 0.2); }
 .ds-badge-error   { background: rgba(239, 68, 68, 0.1); color: #f87171; border-color: rgba(239, 68, 68, 0.2); }
@@ -563,16 +606,20 @@ html.light *:focus-visible {
   background: #12141c;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
+/* Column heads: sentence case like the rest of the app. Weight and
+   colour separate them from the data, not shouting. */
 .ds-table th {
-  padding: 10px 20px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7280;
+  padding: 11px 20px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: #7d8598;
+}
+.ds-table thead {
+  background: #14161f;
 }
 .ds-table tbody tr {
-  transition: background-color 0.15s, transform 0.15s;
+  transition: background-color var(--dur-fast) var(--ease);
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 .ds-table tbody tr:hover {
@@ -590,7 +637,7 @@ html.light *:focus-visible {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 .input-field {
-  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
 }
 .input-field:focus {
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
@@ -602,18 +649,8 @@ html.light *:focus-visible {
   position: relative;
   overflow: hidden;
 }
-.generate-btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.03) 40%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 60%, transparent 100%);
-  background-size: 200% 100%;
-  animation: shimmer 3s ease-in-out infinite;
-}
-.generate-btn:hover::after,
-.generate-btn:disabled::after {
-  animation: none;
-}
+/* The perpetual sheen that used to live here was removed — see
+   .ds-btn-primary. Nothing in this app animates while idle. */
 .card-elevated {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.12);
 }
@@ -657,7 +694,7 @@ html.light .top-header {
   padding-top: 20vh;
   background: rgba(0,0,0,0.5);
   backdrop-filter: blur(8px);
-  animation: fadeIn 0.15s ease-out;
+  animation: fadeIn var(--dur-fast) var(--ease);
 }
 .cmd-palette {
   background: #1a1d28;
@@ -667,7 +704,7 @@ html.light .top-header {
   width: 100%;
   max-width: 520px;
   overflow: hidden;
-  animation: fadeInScale 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: fadeInScale var(--dur-fast) var(--ease);
 }
 .cmd-palette-input {
   width: 100%;
@@ -737,11 +774,11 @@ html.light .cmd-palette-item[data-active="true"] {
   background: #1a1d28;
   border: 1px solid rgba(255,255,255,0.08);
   box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-  animation: toastSlideIn 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: toastSlideIn var(--dur-slow) var(--ease);
   backdrop-filter: blur(12px);
   max-width: 380px;
 }
-.toast-exit { animation: toastSlideOut 0.25s ease-in forwards; }
+.toast-exit { animation: toastSlideOut var(--dur-base) var(--ease-soft) forwards; }
 .toast-success { border-color: rgba(34, 197, 94, 0.2); color: #4ade80; }
 .toast-error   { border-color: rgba(239, 68, 68, 0.2); color: #f87171; }
 .toast-info    { border-color: rgba(99, 102, 241, 0.2); color: #818cf8; }
@@ -805,8 +842,11 @@ html.light .animated-bg::before {
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: var(--shadow-3);
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease),
+    visibility var(--dur-fast) var(--ease);
   pointer-events: none;
   z-index: 100;
 }
@@ -974,3 +1014,150 @@ html.light .border-amber-500\/10,
 html.light .border-amber-500\/20 { border-color: rgba(180, 83, 9, 0.2) !important; }
 html.light .border-red-500\/20 { border-color: rgba(220, 38, 38, 0.15) !important; }
 html.light .border-green-500\/20 { border-color: rgba(22, 163, 74, 0.15) !important; }
+
+/* ══════════════════════════════════════════════════════════════
+   Reduced Motion
+   Honours the OS-level "reduce motion" setting. Motion is removed,
+   never the state change itself — transitions collapse to ~0 so
+   elements still land in their final state instantly.
+   ══════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+  /* Purely decorative motion is dropped outright. */
+  .skeleton {
+    animation: none !important;
+    background: #1a1d28;
+  }
+  html.light .skeleton {
+    background: #e5e7eb;
+  }
+  .progress-bar-fill.animate-progress {
+    animation: none !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Prose measure
+   Long descriptions were spanning the full 1600px viewport, which
+   pushes line length past ~120 characters and hurts readability.
+   Caps the measure without affecting layout width.
+   ══════════════════════════════════════════════════════════════ */
+.ds-page-subtitle,
+.measure {
+  max-width: var(--measure);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Empty & Loading States
+   Previously each screen padded its own placeholder by 80–112px,
+   which left the result area reading as an abandoned void below
+   the form. A bounded, dashed panel says "this region is waiting
+   for input" instead — the same shape on every screen.
+   ══════════════════════════════════════════════════════════════ */
+.ds-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 52px 24px;
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.012);
+  color: #6b7280;
+}
+.ds-empty svg {
+  color: #3e4656;
+}
+.ds-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #9ca3af;
+}
+.ds-empty-hint {
+  font-size: 13px;
+  color: #6b7280;
+  max-width: 46ch;
+  line-height: 1.5;
+}
+html.light .ds-empty {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.015);
+}
+html.light .ds-empty svg {
+  color: #c1c5d0;
+}
+
+/* Inline loading row — same footprint as .ds-empty so swapping
+   between the two does not shift the page. */
+.ds-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 52px 24px;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Sidebar refinement
+   The nav read as a flat list of equal-weight rows. Inactive items
+   now sit back, the active row gets a real selected surface, and
+   the rail is a solid 2.5px marker rather than a pulsing glow.
+   ══════════════════════════════════════════════════════════════ */
+.sidebar-item-btn {
+  border-radius: 9px;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.sidebar-item-btn:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+/* The selected row is a raised surface, not just tinted text. */
+.sidebar-item-btn[data-active="true"] {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.17), rgba(99, 102, 241, 0.1));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 1px 2px rgba(6, 8, 14, 0.35);
+}
+html.light .sidebar-item-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+html.light .sidebar-item-btn[data-active="true"] {
+  background: rgba(99, 102, 241, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.16);
+}
+
+/* Section eyebrow ("Workflows") — the one place caps still earn it,
+   at badge scale where word-shape does not matter. */
+.sidebar-section-label {
+  color: #5a6376;
+}
+
+/* Brand lockup gets a hairline under it rather than a full divider. */
+.sidebar-brand-rule {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Top bar
+   Sits flush with the content beneath it; the blur alone was not
+   enough separation once cards gained their own top highlight.
+   ══════════════════════════════════════════════════════════════ */
+.top-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+}
