@@ -45,6 +45,22 @@ load_dotenv()  # Load .env file (JENKINS_USER, JENKINS_TOKEN, etc.)
 _JENKINS_URL = "https://build-device.netradyne.info"
 _JENKINS_SECURITY_PATH = "/user/s.shankar@netradyne.com/security/"
 
+import time as _time
+_jenkins_auth_failure_ts: float = 0.0  # timestamp of last known auth failure
+_JENKINS_AUTH_COOLDOWN = 300  # 5 minutes — don't retry Jenkins auth within this window
+
+
+def _jenkins_auth_is_broken() -> bool:
+    """Return True if Jenkins auth failed recently (within cooldown window)."""
+    global _jenkins_auth_failure_ts
+    return (_time.time() - _jenkins_auth_failure_ts) < _JENKINS_AUTH_COOLDOWN
+
+
+def _mark_jenkins_auth_failed():
+    """Record that Jenkins auth just failed."""
+    global _jenkins_auth_failure_ts
+    _jenkins_auth_failure_ts = _time.time()
+
 
 def _refresh_jenkins_token() -> dict:
     """
@@ -59,7 +75,7 @@ def _refresh_jenkins_token() -> dict:
         resp = _requests_lib.get(
             f"{_JENKINS_URL}{_JENKINS_SECURITY_PATH}",
             auth=(user, token),
-            timeout=30,
+            timeout=10,
             verify=False,
         )
         code = resp.status_code
@@ -522,6 +538,13 @@ async def test_report_summary(payload: TestReportRequest):
         raise HTTPException(
             status_code=400,
             detail="Both builds are required. Provide build numbers (rc1/rc2) or direct URLs (rc1_url/rc2_url).",
+        )
+
+    # Fast-fail if Jenkins auth is known to be broken
+    if _jenkins_auth_is_broken():
+        raise HTTPException(
+            status_code=503,
+            detail="Jenkins authentication is currently unavailable (token expired). Please update JENKINS_TOKEN in .env on the server and restart the backend."
         )
 
     session = _jenkins_session()
@@ -1251,6 +1274,14 @@ async def tc_analysis(payload: TCAnalysisRequest):
 
     build = payload.build.strip()
     target_tc = payload.tc_id.strip().upper()
+
+    # Fast-fail if Jenkins auth is known to be broken (avoid 30s wait per request)
+    if _jenkins_auth_is_broken():
+        raise HTTPException(
+            status_code=503,
+            detail="Jenkins authentication is currently unavailable (token expired). Please update JENKINS_TOKEN in .env on the server and restart the backend."
+        )
+
     session = _jenkins_session()
 
     # 1. Fetch scr.js (auto-retry once on Jenkins auth failure)
@@ -1258,6 +1289,7 @@ async def tc_analysis(payload: TCAnalysisRequest):
         js = fetch_report_js(build, session, use_cache=True)
     except (SystemExit, Exception) as exc:
         if _is_jenkins_auth_error(str(exc)):
+            _mark_jenkins_auth_failed()
             logger.info("Jenkins auth failure on scr.js fetch — refreshing token and retrying…")
             refresh = _refresh_jenkins_token()
             if refresh["ok"]:
@@ -1267,7 +1299,7 @@ async def tc_analysis(payload: TCAnalysisRequest):
                 except Exception as exc2:
                     raise HTTPException(status_code=500, detail=f"Failed to fetch report after token refresh: {exc2}")
             else:
-                raise HTTPException(status_code=500, detail=f"Jenkins authentication failed and token refresh did not help: {exc}")
+                raise HTTPException(status_code=503, detail=f"Jenkins authentication failed — the API token has expired. Please generate a new token at Jenkins → User → Configure → API Token.")
         else:
             raise HTTPException(status_code=500, detail=f"Failed to fetch report: {exc}")
 
@@ -1335,7 +1367,7 @@ async def tc_analysis(payload: TCAnalysisRequest):
         _log_error = ""
         _total = 0
         try:
-            resp = sess.get(log_url, timeout=120, allow_redirects=False)
+            resp = sess.get(log_url, timeout=30, allow_redirects=False)
             if resp.is_redirect:
                 location = resp.headers.get("Location", "")
                 if "commenceLogin" in location or "securityRealm" in location:
