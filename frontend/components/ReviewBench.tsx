@@ -123,6 +123,46 @@ function initials(name: string): string {
   return (p[0][0] + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase();
 }
 
+function IconExternal() {
+  return (
+    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+    </svg>
+  );
+}
+function IconUp() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+    </svg>
+  );
+}
+function IconDown() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+    </svg>
+  );
+}
+function IconCheck() {
+  return (
+    <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+    </svg>
+  );
+}
+function IconChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-3 w-3 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+    </svg>
+  );
+}
+
 interface Note { id: number; kind: "success" | "error" | "info"; text: string; exiting?: boolean }
 let noteId = 0;
 
@@ -142,6 +182,7 @@ export default function ReviewBench() {
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
   const [showResolved, setShowResolved] = useState<Record<string, boolean>>({});
   const [foldSrc, setFoldSrc] = useState<Record<string, boolean>>({});
+  const [openWhy, setOpenWhy] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
 
@@ -379,7 +420,7 @@ export default function ReviewBench() {
   }
 
   return (
-    <div className="flex flex-col gap-4" style={{ height: "calc(100vh - 8.5rem)" }}>
+    <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 8.5rem)" }}>
       {/* toolbar ---------------------------------------------------------- */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-1">
@@ -387,7 +428,7 @@ export default function ReviewBench() {
             <button
               key={q.key}
               onClick={() => { setQueue(q.key); }}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] transition-colors ${
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-[14px] transition-colors ${
                 queue === q.key
                   ? "bg-indigo-500/15 text-indigo-300 font-semibold"
                   : "text-gray-400 hover:text-gray-200"
@@ -455,7 +496,7 @@ export default function ReviewBench() {
                   : "border-white/[0.07] text-gray-600 hover:text-indigo-300"
               }`}
             >
-              ↗
+              <IconExternal />
             </a>
           </span>
         ))}
@@ -479,7 +520,7 @@ export default function ReviewBench() {
       )}
 
       {/* two panes -------------------------------------------------------- */}
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[330px_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[352px_minmax(0,1fr)]">
         {/* queue */}
         <div className="ds-card flex min-h-0 flex-col overflow-hidden">
           <div className="ds-card-header flex items-center justify-between">
@@ -491,7 +532,7 @@ export default function ReviewBench() {
           </div>
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
             {visible.length === 0 ? (
-              <div className="px-5 py-14 text-center text-[13px] leading-relaxed text-gray-600">
+              <div className="px-6 py-16 text-center text-[14.5px] leading-relaxed text-gray-600">
                 {query
                   ? `Nothing matches “${query}” here.`
                   : queue === "pending"
@@ -510,8 +551,8 @@ export default function ReviewBench() {
                 return (
                   <div key={t.tc_key}>
                     {first && (
-                      <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-white/[0.055] bg-[#171a24]/95 px-4 py-1.5 backdrop-blur">
-                        <span className="font-mono text-[11px] font-semibold text-gray-400">{t.dt}</span>
+                      <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-white/[0.055] bg-[#171a24]/95 px-5 py-2.5 backdrop-blur">
+                        <span className="font-mono text-[12px] font-semibold text-gray-400">{t.dt}</span>
                         <span className="h-px flex-1 bg-white/[0.06]" />
                         <span className="font-mono text-[10px] tabular-nums text-gray-600">
                           {visible.filter((x) => x.dt === t.dt).length}
@@ -520,18 +561,18 @@ export default function ReviewBench() {
                     )}
                     <button
                       onClick={() => { setSel(t.tc_key); detailRef.current?.scrollTo({ top: 0 }); }}
-                      className={`relative block w-full border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
+                      className={`relative block w-full border-b border-white/[0.05] px-5 py-4 text-left transition-colors ${
                         active ? "bg-indigo-500/10" : "hover:bg-white/[0.025]"
                       }`}
                     >
                       {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-indigo-400" />}
-                      <span className="mb-1 flex items-center gap-2">
+                      <span className="mb-1.5 flex items-center gap-2.5">
                         <span
                           className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                             t.review_status === "reviewed" ? "bg-emerald-400" : "bg-amber-400"
                           }`}
                         />
-                        <span className={`font-mono text-[12.5px] font-semibold ${active ? "text-indigo-300" : "text-gray-200"}`}>
+                        <span className={`font-mono text-[14px] font-semibold ${active ? "text-indigo-300" : "text-gray-200"}`}>
                           {t.tc_id}
                         </span>
                         <span className="h-px flex-1" />
@@ -546,7 +587,7 @@ export default function ReviewBench() {
                           </span>
                         )}
                       </span>
-                      <span className="line-clamp-2 block text-[12.5px] leading-snug text-gray-500">
+                      <span className="line-clamp-2 block text-[13.5px] leading-relaxed text-gray-500">
                         {t.tc_summary}
                       </span>
                     </button>
@@ -564,12 +605,12 @@ export default function ReviewBench() {
 
         {/* detail */}
         {current ? (
-          <div className="flex min-h-0 flex-col gap-4">
+          <div className="flex min-h-0 flex-col gap-5">
             {/* sticky action bar */}
-            <div className="ds-card flex flex-wrap items-center gap-3 px-5 py-3">
+            <div className="ds-card flex flex-wrap items-center gap-4 px-6 py-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2.5">
-                  <span className="font-mono text-[15px] font-semibold text-gray-100">{current.tc_id}</span>
+                  <span className="font-mono text-[18px] font-semibold text-gray-100">{current.tc_id}</span>
                   <span className={`ds-badge ${current.review_status === "reviewed" ? "ds-badge-success" : "ds-badge-warning"}`}>
                     {current.review_status === "reviewed" ? "Reviewed" : "Needs review"}
                   </span>
@@ -580,14 +621,15 @@ export default function ReviewBench() {
                     <span className="ds-badge ds-badge-error">{current.flag.split(" — ")[0]}</span>
                   )}
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-gray-600">
+                <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-gray-600">
                   <a
                     href={current.dt_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-mono font-semibold text-indigo-400 hover:underline"
+                    className="inline-flex items-center gap-1.5 font-mono font-semibold text-indigo-400 hover:underline"
                   >
-                    {current.dt} ↗
+                    {current.dt}
+                    <IconExternal />
                   </a>
                   <span>·</span><span>{current.component}</span>
                   <span>·</span><span>{current.fix_version}</span>
@@ -601,13 +643,13 @@ export default function ReviewBench() {
                     disabled={idx <= 0}
                     className="px-2.5 py-1.5 text-gray-500 transition-colors hover:text-indigo-300 disabled:opacity-30"
                     aria-label="Previous testcase"
-                  >↑</button>
+                  ><IconUp /></button>
                   <button
                     onClick={() => move(1)}
                     disabled={idx >= visible.length - 1}
                     className="border-l border-white/[0.08] px-2.5 py-1.5 text-gray-500 transition-colors hover:text-indigo-300 disabled:opacity-30"
                     aria-label="Next testcase"
-                  >↓</button>
+                  ><IconDown /></button>
                 </div>
                 <button
                   className="ds-btn-secondary"
@@ -628,7 +670,7 @@ export default function ReviewBench() {
             </div>
 
             {/* scrolling detail body */}
-            <div ref={detailRef} className="main-content flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+            <div ref={detailRef} className="main-content flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-2">
               {/* ticket */}
               <section className="ds-card">
                 <div className="ds-card-header flex items-center justify-between">
@@ -639,14 +681,15 @@ export default function ReviewBench() {
                     rel="noopener noreferrer"
                     className="font-mono text-[12px] font-semibold text-indigo-400 hover:underline"
                   >
-                    {current.dt} ↗
+                    {current.dt}
+                    <IconExternal />
                   </a>
                 </div>
-                <div className="p-5">
-                  <h2 className="mb-3 max-w-[64ch] text-[17px] font-semibold leading-snug text-gray-100">
+                <div className="p-7">
+                  <h2 className="mb-4 max-w-[62ch] text-[19px] font-semibold leading-snug text-gray-100">
                     {current.dt_summary}
                   </h2>
-                  <div className="mb-4 flex flex-wrap gap-2">
+                  <div className="mb-5 flex flex-wrap gap-2">
                     {[
                       ["Component", current.component],
                       ["Fix version", current.fix_version],
@@ -654,14 +697,24 @@ export default function ReviewBench() {
                       ["Jira", current.jira_status],
                       ["Service", current.service],
                     ].filter(([, v]) => v).map(([k, v]) => (
-                      <span key={k} className="rounded-md border border-white/[0.07] bg-white/[0.02] px-2.5 py-1 font-mono text-[10.5px] text-gray-400">
+                      <span key={k} className="rounded-md border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 font-mono text-[11.5px] text-gray-400">
                         <span className="mr-2 uppercase tracking-wider text-gray-600">{k}</span>{v}
                       </span>
                     ))}
                   </div>
-                  <p className="max-w-[66ch] text-[14px] leading-relaxed text-gray-400">
-                    {current.dt_description}
-                  </p>
+                  <button
+                    onClick={() => setOpenWhy((p) => ({ ...p, [current.dt]: !p[current.dt] }))}
+                    className="flex items-center gap-2.5 text-[13px] text-gray-500 transition-colors hover:text-indigo-300"
+                    aria-expanded={!!openWhy[current.dt]}
+                  >
+                    <IconChevron open={!!openWhy[current.dt]} />
+                    {openWhy[current.dt] ? "Hide why this ticket exists" : "Why this ticket exists"}
+                  </button>
+                  {openWhy[current.dt] && (
+                    <p className="mt-4 max-w-[68ch] border-t border-white/[0.06] pt-4 text-[15px] leading-[1.75] text-gray-400">
+                      {current.dt_description}
+                    </p>
+                  )}
                 </div>
               </section>
 
@@ -672,8 +725,8 @@ export default function ReviewBench() {
                     What this testcase does
                   </span>
                 </div>
-                <div className="p-5">
-                  <p className="max-w-[74ch] text-[14px] leading-relaxed text-gray-300">{current.tc_summary}</p>
+                <div className="p-7">
+                  <p className="max-w-[72ch] text-[15.5px] leading-[1.7] text-gray-300">{current.tc_summary}</p>
                   <div className="mt-4 grid gap-px overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.07] sm:grid-cols-2">
                     <Meta label="Testcase file" value={current.tc_file} title={current.tc_path}
                           onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
@@ -681,10 +734,6 @@ export default function ReviewBench() {
                           muted={!current.report_url}
                           href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
                     <Meta label="Pushed" value={fmtDate(current.pushed_at)} />
-                    <Meta label="Review status"
-                          value={current.review_status === "reviewed"
-                            ? `Reviewed by ${current.reviewed_by ?? "someone"} · ${fmtDate(current.reviewed_at)}`
-                            : "Awaiting review"} />
                     {current.flag && (
                       <div className="bg-[#1a1d28] p-3.5 sm:col-span-2">
                         <div className="mb-1.5 font-mono text-[9px] uppercase tracking-widest text-gray-600">Flag</div>
@@ -725,13 +774,13 @@ export default function ReviewBench() {
                 </div>
                 {!foldSrc[current.tc_key] && (
                   current.source ? (
-                    <div className="scrollbar-thin max-h-[58vh] overflow-auto bg-[#0d0f16]">
-                      <div className="flex min-w-min items-start font-mono text-[12px] leading-[1.7]">
-                        <div className="sticky left-0 z-10 shrink-0 select-none whitespace-pre border-r border-white/[0.06] bg-[#0b0d13] px-3 py-4 text-right text-gray-700 tabular-nums">
+                    <div className="scrollbar-thin max-h-[60vh] overflow-auto bg-[#0d0f16]">
+                      <div className="flex min-w-min items-start font-mono text-[13px] leading-[1.75]">
+                        <div className="sticky left-0 z-10 shrink-0 select-none whitespace-pre border-r border-white/[0.06] bg-[#0b0d13] px-4 py-5 text-right text-gray-700 tabular-nums">
                           {current.source.split("\n").map((_, i) => i + 1).join("\n")}
                         </div>
                         <div
-                          className="whitespace-pre px-5 py-4 text-gray-300"
+                          className="whitespace-pre px-6 py-5 text-gray-300"
                           dangerouslySetInnerHTML={{ __html: highlight(current.source) }}
                         />
                       </div>
@@ -764,9 +813,9 @@ export default function ReviewBench() {
                     </button>
                   )}
                 </div>
-                <div className="p-5">
+                <div className="p-7">
                   {current.comments.length === 0 && (
-                    <p className="mb-5 max-w-[58ch] text-[13.5px] leading-relaxed text-gray-500">
+                    <p className="mb-6 max-w-[60ch] text-[15px] leading-[1.7] text-gray-500">
                       No comments yet. If something needs changing before this testcase ships, or
                       you have a question about how it works, write it below — everyone reviewing
                       will see it.
@@ -778,13 +827,13 @@ export default function ReviewBench() {
                     .map((c) => (
                       <div
                         key={c.id}
-                        className={`border-b border-white/[0.05] py-4 first:pt-0 last:border-0 ${c.resolved ? "opacity-60" : ""}`}
+                        className={`border-b border-white/[0.05] py-5 first:pt-0 last:border-0 ${c.resolved ? "opacity-60" : ""}`}
                       >
                         <div className="mb-2 flex flex-wrap items-center gap-2.5">
-                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/15 text-[10px] font-semibold text-indigo-300">
+                          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-500/15 text-[11px] font-semibold text-indigo-300">
                             {initials(c.author)}
                           </span>
-                          <span className="text-[13px] font-semibold text-gray-200">{c.author || "Someone"}</span>
+                          <span className="text-[14.5px] font-semibold text-gray-200">{c.author || "Someone"}</span>
                           <span className={`ds-badge ${
                             c.kind === "change" ? "ds-badge-error"
                             : c.kind === "question" ? "ds-badge-info"
@@ -795,27 +844,28 @@ export default function ReviewBench() {
                             {fmtWhen(c.created_at)}
                           </span>
                         </div>
-                        <div className="max-w-[68ch] whitespace-pre-wrap pl-[34px] text-[14px] leading-relaxed text-gray-300">
+                        <div className="max-w-[68ch] whitespace-pre-wrap pl-[38px] text-[15.5px] leading-[1.75] text-gray-300">
                           {c.body}
                         </div>
                         <div className="mt-2.5 flex flex-wrap items-center gap-4 pl-[34px]">
                           <button
-                            className="text-[11.5px] text-gray-500 transition-colors hover:text-indigo-300"
+                            className="text-[12.5px] text-gray-500 transition-colors hover:text-indigo-300"
                             onClick={() => resolveComment(c, !c.resolved)}
                           >
                             {c.resolved ? "Reopen" : "Mark resolved"}
                           </button>
                           {reviewer && c.author === reviewer && (
                             <button
-                              className="text-[11.5px] text-gray-500 transition-colors hover:text-rose-400"
+                              className="text-[12.5px] text-gray-500 transition-colors hover:text-rose-400"
                               onClick={() => (confirmDel === c.id ? removeComment(c) : setConfirmDel(c.id))}
                             >
                               {confirmDel === c.id ? "Really delete?" : "Delete"}
                             </button>
                           )}
                           {c.resolved && (
-                            <span className="font-mono text-[10.5px] text-emerald-400">
-                              ✓ resolved by {c.resolved_by ?? "someone"}
+                            <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-emerald-400">
+                              <IconCheck />
+                              resolved by {c.resolved_by ?? "someone"}
                             </span>
                           )}
                         </div>
@@ -823,10 +873,10 @@ export default function ReviewBench() {
                     ))}
 
                   {/* composer — always on screen, never behind a tab or a button */}
-                  <div className="mt-5 max-w-[72ch]">
+                  <div className="mt-7 max-w-[72ch]">
                     <textarea
                       ref={composerRef}
-                      className="ds-input min-h-[96px] w-full resize-y leading-relaxed"
+                      className="ds-input min-h-[116px] w-full resize-y text-[15px] leading-[1.7]"
                       placeholder="What needs changing, or what do you want to ask about this testcase?"
                       value={drafts[current.tc_key] ?? ""}
                       onChange={(e) => setDrafts((p) => ({ ...p, [current.tc_key]: e.target.value }))}
@@ -851,7 +901,9 @@ export default function ReviewBench() {
                         })}
                       </div>
                       <div className="flex items-center gap-2.5">
-                        <span className="font-mono text-[9.5px] text-gray-600">⌘↵ to post</span>
+                        <span className="hidden font-mono text-[11px] text-gray-600 sm:inline">
+                          Ctrl+Enter to post
+                        </span>
                         <button
                           className="ds-btn-secondary"
                           onClick={() => setDrafts((p) => ({ ...p, [current.tc_key]: "" }))}
