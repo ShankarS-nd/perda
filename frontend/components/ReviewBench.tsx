@@ -672,254 +672,263 @@ export default function ReviewBench() {
               </div>
             </div>
 
-            <div ref={detailRef} className="main-content flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-2">
-              {/* what it does — short orientation, then straight to the code */}
-              <section className="ds-card">
-                <div className="p-7">
-                    <div className="mb-3 font-mono text-[11px] uppercase tracking-widest text-gray-600">
-                    What this testcase does
-                  </div>
-                  <p className="max-w-[72ch] text-[15.5px] leading-[1.75] text-gray-300">
-                    {current.tc_summary}
-                  </p>
-
-                  <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2">
-                    <Field label="File" mono value={current.tc_file} title={current.tc_path}
-                           onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
-                    <Field label="Test report" mono muted={!current.report_url}
-                           value={current.report_url ?? "not linked yet"}
-                           href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
-                    <Field label="Pushed" mono value={fmtDate(current.pushed_at)} />
-                    {current.review_status === "reviewed" && (
-                      <Field label="Signed off" mono
-                             value={`${current.reviewed_by ?? "someone"} · ${fmtDate(current.reviewed_at)}`} />
-                    )}
-                    {current.flag && (
-                      <div className="sm:col-span-2">
-                        <dt className="mb-1.5 font-mono text-[10.5px] uppercase tracking-widest text-gray-600">Flag</dt>
-                        <dd className="max-w-[70ch] text-[14px] leading-relaxed text-rose-300/90">{current.flag}</dd>
-                      </div>
-                    )}
-                  </dl>
-                </div>
-              </section>
-
-              {/* source */}
-              <section className="ds-card overflow-hidden">
-                <div className="flex items-center gap-4 border-b border-white/[0.055] px-6 py-3.5">
-                  <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">
-                    Testcase source
-                  </span>
-                  <span className="truncate font-mono text-[12px] text-gray-600">{current.tc_path}</span>
-                  <span className="ml-auto flex shrink-0 items-center gap-3">
-                    <span className="font-mono text-[11px] tabular-nums text-gray-600">
-                      {current.source ? `${current.source.split("\n").length} lines` : "not pushed"}
+            {/* The file is the job, so it gets the main column. Ticket background
+               and the testcase blurb sit in a rail that stays put while the code
+               scrolls — reference you glance at, not content you read through. */}
+            <div ref={detailRef} className="main-content min-h-0 flex-1 overflow-y-auto pr-2">
+              <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="flex min-w-0 flex-col gap-5">
+                {/* source */}
+                <section className="ds-card overflow-hidden">
+                  <div className="flex items-center gap-4 border-b border-white/[0.055] px-6 py-3.5">
+                    <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">
+                      Testcase source
                     </span>
-                    {current.source && (
-                      <>
-                        <button
-                          className="rounded-md border border-white/[0.08] px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
-                          onClick={() => { navigator.clipboard?.writeText(current.source); note("info", "File copied"); }}
-                        >
-                          Copy
-                        </button>
-                        <button
-                          className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
-                          onClick={() => setFoldSrc((p) => ({ ...p, [current.tc_key]: !p[current.tc_key] }))}
-                        >
-                          <IconChevron open={!foldSrc[current.tc_key]} />
-                          {foldSrc[current.tc_key] ? "Show" : "Hide"}
-                        </button>
-                      </>
-                    )}
-                  </span>
-                </div>
-                {!foldSrc[current.tc_key] &&
-                  (current.source ? (
-                    <div className="scrollbar-thin max-h-[60vh] overflow-auto bg-[#0d0f16]">
-                      <div className="flex min-w-min items-start font-mono text-[13px] leading-[1.75]">
-                        <div className="sticky left-0 z-10 shrink-0 select-none whitespace-pre border-r border-white/[0.06] bg-[#0b0d13] px-4 py-5 text-right text-gray-700 tabular-nums">
-                          {current.source.split("\n").map((_, i) => i + 1).join("\n")}
-                        </div>
-                        <div
-                          className="whitespace-pre px-6 py-5 text-gray-300"
-                          dangerouslySetInnerHTML={{ __html: highlight(current.source) }}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-7 text-[14px] text-gray-600">
-                      The file was not included in this push, so there is nothing to show yet.
-                    </div>
-                  ))}
-              </section>
-
-              {/* discussion */}
-              <section className="ds-card">
-                <div className="flex items-center gap-4 border-b border-white/[0.055] px-6 py-3.5">
-                  <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">Discussion</span>
-                  <span className="font-mono text-[12px] text-gray-600">
-                    {current.comments.length
-                      ? `${current.comments.length} comment${current.comments.length === 1 ? "" : "s"}`
-                      : "none yet"}
-                  </span>
-                  {current.comments.some((c) => c.resolved) && (
-                    <button
-                      className="ml-auto font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
-                      onClick={() => setShowResolved((p) => ({ ...p, [current.tc_key]: !p[current.tc_key] }))}
-                    >
-                      {showResolved[current.tc_key] ? "Hide" : "Show"}{" "}
-                      {current.comments.filter((c) => c.resolved).length} resolved
-                    </button>
-                  )}
-                </div>
-
-                <div className="p-7">
-                  {current.comments.length === 0 && (
-                    <p className="mb-7 max-w-[60ch] text-[15px] leading-[1.7] text-gray-500">
-                      Nothing raised yet. If something needs changing before this testcase ships,
-                      or you want to ask how it works, write it below — everyone reviewing sees it.
-                    </p>
-                  )}
-
-                  {current.comments
-                    .filter((c) => !c.resolved || showResolved[current.tc_key])
-                    .map((c) => (
-                      <div
-                        key={c.id}
-                        className={`border-b border-white/[0.05] py-6 first:pt-0 last:border-0 last:pb-0 ${c.resolved ? "opacity-55" : ""}`}
-                      >
-                        <div className="mb-3 flex flex-wrap items-center gap-3">
-                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/15 text-[12px] font-semibold text-indigo-300">
-                            {initials(c.author)}
-                          </span>
-                          <span className="text-[15px] font-semibold text-gray-200">{c.author || "Someone"}</span>
-                          <span
-                            className={`ds-badge ${
-                              c.kind === "change" ? "ds-badge-error"
-                              : c.kind === "question" ? "ds-badge-info"
-                              : "ds-badge-neutral"
-                            }`}
-                          >
-                            {KINDS.find((k) => k.key === c.kind)?.label ?? "Note"}
-                          </span>
-                          <span className="font-mono text-[11.5px] tabular-nums text-gray-600">
-                            {fmtWhen(c.created_at)}
-                          </span>
-                        </div>
-                        <div className="max-w-[68ch] whitespace-pre-wrap pl-11 text-[15.5px] leading-[1.75] text-gray-300">
-                          {c.body}
-                        </div>
-                        <div className="mt-3.5 flex flex-wrap items-center gap-5 pl-11">
+                    <span className="truncate font-mono text-[12px] text-gray-600">{current.tc_path}</span>
+                    <span className="ml-auto flex shrink-0 items-center gap-3">
+                      <span className="font-mono text-[11px] tabular-nums text-gray-600">
+                        {current.source ? `${current.source.split("\n").length} lines` : "not pushed"}
+                      </span>
+                      {current.source && (
+                        <>
                           <button
-                            className="text-[13px] text-gray-500 transition-colors hover:text-indigo-300"
-                            onClick={() => resolveComment(c, !c.resolved)}
+                            className="rounded-md border border-white/[0.08] px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
+                            onClick={() => { navigator.clipboard?.writeText(current.source); note("info", "File copied"); }}
                           >
-                            {c.resolved ? "Reopen" : "Mark resolved"}
+                            Copy
                           </button>
-                          {reviewer && c.author === reviewer && (
-                            <button
-                              className="text-[13px] text-gray-500 transition-colors hover:text-rose-400"
-                              onClick={() => (confirmDel === c.id ? removeComment(c) : setConfirmDel(c.id))}
-                            >
-                              {confirmDel === c.id ? "Really delete?" : "Delete"}
-                            </button>
-                          )}
-                          {c.resolved && (
-                            <span className="flex items-center gap-1.5 font-mono text-[12px] text-emerald-400">
-                              <IconCheck />
-                              resolved by {c.resolved_by ?? "someone"}
-                            </span>
-                          )}
+                          <button
+                            className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
+                            onClick={() => setFoldSrc((p) => ({ ...p, [current.tc_key]: !p[current.tc_key] }))}
+                          >
+                            <IconChevron open={!foldSrc[current.tc_key]} />
+                            {foldSrc[current.tc_key] ? "Show" : "Hide"}
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  {!foldSrc[current.tc_key] &&
+                    (current.source ? (
+                      <div className="scrollbar-thin max-h-[60vh] overflow-auto bg-[#0d0f16]">
+                        <div className="flex min-w-min items-start font-mono text-[13px] leading-[1.75]">
+                          <div className="sticky left-0 z-10 shrink-0 select-none whitespace-pre border-r border-white/[0.06] bg-[#0b0d13] px-4 py-5 text-right text-gray-700 tabular-nums">
+                            {current.source.split("\n").map((_, i) => i + 1).join("\n")}
+                          </div>
+                          <div
+                            className="whitespace-pre px-6 py-5 text-gray-300"
+                            dangerouslySetInnerHTML={{ __html: highlight(current.source) }}
+                          />
                         </div>
+                      </div>
+                    ) : (
+                      <div className="p-7 text-[14px] text-gray-600">
+                        The file was not included in this push, so there is nothing to show yet.
                       </div>
                     ))}
+                </section>
 
-                  <div className="mt-8 max-w-[72ch]">
-                    <textarea
-                      ref={composerRef}
-                      className="ds-input min-h-[120px] w-full resize-y text-[15.5px] leading-[1.7]"
-                      placeholder="What needs changing, or what do you want to ask about this testcase?"
-                      value={drafts[current.tc_key] ?? ""}
-                      onChange={(e) => setDrafts((p) => ({ ...p, [current.tc_key]: e.target.value }))}
-                    />
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-                      <div className="flex gap-2">
-                        {KINDS.map((k) => {
-                          const on = (kinds[current.tc_key] ?? "change") === k.key;
-                          return (
-                            <button
-                              key={k.key}
-                              onClick={() => setKinds((p) => ({ ...p, [current.tc_key]: k.key }))}
-                              className={`rounded-lg border px-3 py-2 font-mono text-[10.5px] uppercase tracking-wider transition-colors ${
-                                on
-                                  ? "border-indigo-500/50 bg-indigo-500/10 font-semibold text-indigo-300"
-                                  : "border-white/[0.08] text-gray-500 hover:text-gray-300"
+                {/* discussion */}
+                <section className="ds-card">
+                  <div className="flex items-center gap-4 border-b border-white/[0.055] px-6 py-3.5">
+                    <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">Discussion</span>
+                    <span className="font-mono text-[12px] text-gray-600">
+                      {current.comments.length
+                        ? `${current.comments.length} comment${current.comments.length === 1 ? "" : "s"}`
+                        : "none yet"}
+                    </span>
+                    {current.comments.some((c) => c.resolved) && (
+                      <button
+                        className="ml-auto font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
+                        onClick={() => setShowResolved((p) => ({ ...p, [current.tc_key]: !p[current.tc_key] }))}
+                      >
+                        {showResolved[current.tc_key] ? "Hide" : "Show"}{" "}
+                        {current.comments.filter((c) => c.resolved).length} resolved
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="p-7">
+                    {current.comments.length === 0 && (
+                      <p className="mb-7 max-w-[60ch] text-[15px] leading-[1.7] text-gray-500">
+                        Nothing raised yet. If something needs changing before this testcase ships,
+                        or you want to ask how it works, write it below — everyone reviewing sees it.
+                      </p>
+                    )}
+
+                    {current.comments
+                      .filter((c) => !c.resolved || showResolved[current.tc_key])
+                      .map((c) => (
+                        <div
+                          key={c.id}
+                          className={`border-b border-white/[0.05] py-6 first:pt-0 last:border-0 last:pb-0 ${c.resolved ? "opacity-55" : ""}`}
+                        >
+                          <div className="mb-3 flex flex-wrap items-center gap-3">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/15 text-[12px] font-semibold text-indigo-300">
+                              {initials(c.author)}
+                            </span>
+                            <span className="text-[15px] font-semibold text-gray-200">{c.author || "Someone"}</span>
+                            <span
+                              className={`ds-badge ${
+                                c.kind === "change" ? "ds-badge-error"
+                                : c.kind === "question" ? "ds-badge-info"
+                                : "ds-badge-neutral"
                               }`}
                             >
-                              {k.label}
+                              {KINDS.find((k) => k.key === c.kind)?.label ?? "Note"}
+                            </span>
+                            <span className="font-mono text-[11.5px] tabular-nums text-gray-600">
+                              {fmtWhen(c.created_at)}
+                            </span>
+                          </div>
+                          <div className="max-w-[68ch] whitespace-pre-wrap pl-11 text-[15.5px] leading-[1.75] text-gray-300">
+                            {c.body}
+                          </div>
+                          <div className="mt-3.5 flex flex-wrap items-center gap-5 pl-11">
+                            <button
+                              className="text-[13px] text-gray-500 transition-colors hover:text-indigo-300"
+                              onClick={() => resolveComment(c, !c.resolved)}
+                            >
+                              {c.resolved ? "Reopen" : "Mark resolved"}
                             </button>
-                          );
-                        })}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="hidden font-mono text-[11px] text-gray-600 sm:inline">
-                          Ctrl+Enter to post
-                        </span>
-                        <button
-                          className="ds-btn-secondary text-[14px]"
-                          onClick={() => setDrafts((p) => ({ ...p, [current.tc_key]: "" }))}
-                        >
-                          Clear
-                        </button>
-                        <button className="ds-btn-primary text-[14px]" onClick={() => postComment(current)}>
-                          Post comment
-                        </button>
+                            {reviewer && c.author === reviewer && (
+                              <button
+                                className="text-[13px] text-gray-500 transition-colors hover:text-rose-400"
+                                onClick={() => (confirmDel === c.id ? removeComment(c) : setConfirmDel(c.id))}
+                              >
+                                {confirmDel === c.id ? "Really delete?" : "Delete"}
+                              </button>
+                            )}
+                            {c.resolved && (
+                              <span className="flex items-center gap-1.5 font-mono text-[12px] text-emerald-400">
+                                <IconCheck />
+                                resolved by {c.resolved_by ?? "someone"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                    <div className="mt-8 max-w-[72ch]">
+                      <textarea
+                        ref={composerRef}
+                        className="ds-input min-h-[120px] w-full resize-y text-[15.5px] leading-[1.7]"
+                        placeholder="What needs changing, or what do you want to ask about this testcase?"
+                        value={drafts[current.tc_key] ?? ""}
+                        onChange={(e) => setDrafts((p) => ({ ...p, [current.tc_key]: e.target.value }))}
+                      />
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex gap-2">
+                          {KINDS.map((k) => {
+                            const on = (kinds[current.tc_key] ?? "change") === k.key;
+                            return (
+                              <button
+                                key={k.key}
+                                onClick={() => setKinds((p) => ({ ...p, [current.tc_key]: k.key }))}
+                                className={`rounded-lg border px-3 py-2 font-mono text-[10.5px] uppercase tracking-wider transition-colors ${
+                                  on
+                                    ? "border-indigo-500/50 bg-indigo-500/10 font-semibold text-indigo-300"
+                                    : "border-white/[0.08] text-gray-500 hover:text-gray-300"
+                                }`}
+                              >
+                                {k.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="hidden font-mono text-[11px] text-gray-600 sm:inline">
+                            Ctrl+Enter to post
+                          </span>
+                          <button
+                            className="ds-btn-secondary text-[14px]"
+                            onClick={() => setDrafts((p) => ({ ...p, [current.tc_key]: "" }))}
+                          >
+                            Clear
+                          </button>
+                          <button className="ds-btn-primary text-[14px]" onClick={() => postComment(current)}>
+                            Post comment
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
+                </section>
                 </div>
-              </section>
 
-              {/* ticket reference — background, not the job; last on purpose */}
-              <section className="ds-card">
-                <div className="p-7">
-                  <h2 className="max-w-[62ch] text-[20px] font-semibold leading-snug tracking-tight text-gray-100">
-                    {current.dt_summary}
-                  </h2>
+                <aside className="flex flex-col gap-5 xl:sticky xl:top-0">
+                {/* ticket reference — background, not the job; last on purpose */}
+                <section className="ds-card">
+                  <div className="p-6">
+                    <h2 className="text-[17px] font-semibold leading-snug tracking-tight text-gray-100">
+                      {current.dt_summary}
+                    </h2>
 
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {[
-                      ["Component", current.component],
-                      ["Fix version", current.fix_version],
-                      ["Priority", current.priority],
-                      ["Jira", current.jira_status],
-                    ].filter(([, v]) => v).map(([k, v]) => (
-                      <span
-                        key={k}
-                        className="rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 font-mono text-[12px] text-gray-400"
-                      >
-                        <span className="mr-2 uppercase tracking-wider text-gray-600">{k}</span>{v}
-                      </span>
-                    ))}
+                    <div className="mt-5 flex flex-wrap gap-2">
+                      {[
+                        ["Component", current.component],
+                        ["Fix version", current.fix_version],
+                        ["Priority", current.priority],
+                        ["Jira", current.jira_status],
+                      ].filter(([, v]) => v).map(([k, v]) => (
+                        <span
+                          key={k}
+                          className="rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 font-mono text-[12px] text-gray-400"
+                        >
+                          <span className="mr-2 uppercase tracking-wider text-gray-600">{k}</span>{v}
+                        </span>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => setOpenWhy((p) => ({ ...p, [current.dt]: !p[current.dt] }))}
+                      className="mt-5 flex items-center gap-2.5 text-[13.5px] text-gray-500 transition-colors hover:text-indigo-300"
+                      aria-expanded={!!openWhy[current.dt]}
+                    >
+                      <IconChevron open={!!openWhy[current.dt]} />
+                      {openWhy[current.dt] ? "Hide why this ticket exists" : "Why this ticket exists"}
+                    </button>
+                    {openWhy[current.dt] && (
+                      <p className="mt-4 border-t border-white/[0.06] pt-4 text-[15px] leading-[1.75] text-gray-400">
+                        {current.dt_description}
+                      </p>
+                    )}
+
                   </div>
+                </section>
 
-                  <button
-                    onClick={() => setOpenWhy((p) => ({ ...p, [current.dt]: !p[current.dt] }))}
-                    className="mt-5 flex items-center gap-2.5 text-[13.5px] text-gray-500 transition-colors hover:text-indigo-300"
-                    aria-expanded={!!openWhy[current.dt]}
-                  >
-                    <IconChevron open={!!openWhy[current.dt]} />
-                    {openWhy[current.dt] ? "Hide why this ticket exists" : "Why this ticket exists"}
-                  </button>
-                  {openWhy[current.dt] && (
-                    <p className="mt-4 max-w-[68ch] border-t border-white/[0.06] pt-4 text-[15px] leading-[1.75] text-gray-400">
-                      {current.dt_description}
+                {/* what it does — short orientation, then straight to the code */}
+                <section className="ds-card">
+                  <div className="p-6">
+                      <div className="mb-3 font-mono text-[11px] uppercase tracking-widest text-gray-600">
+                      What this testcase does
+                    </div>
+                    <p className="text-[14.5px] leading-[1.7] text-gray-300">
+                      {current.tc_summary}
                     </p>
-                  )}
 
-                </div>
-              </section>
+                    <dl className="mt-5 grid gap-y-4">
+                      <Field label="File" mono value={current.tc_file} title={current.tc_path}
+                             onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
+                      <Field label="Test report" mono muted={!current.report_url}
+                             value={current.report_url ?? "not linked yet"}
+                             href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
+                      <Field label="Pushed" mono value={fmtDate(current.pushed_at)} />
+                      {current.review_status === "reviewed" && (
+                        <Field label="Signed off" mono
+                               value={`${current.reviewed_by ?? "someone"} · ${fmtDate(current.reviewed_at)}`} />
+                      )}
+                      {current.flag && (
+                        <div>
+                          <dt className="mb-1.5 font-mono text-[10.5px] uppercase tracking-widest text-gray-600">Flag</dt>
+                          <dd className="max-w-[70ch] text-[14px] leading-relaxed text-rose-300/90">{current.flag}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  </div>
+                </section>
+                </aside>
+              </div>
             </div>
           </div>
         ) : (
