@@ -126,6 +126,12 @@ from database import (
     delete_workflow,
     get_workflow_runs,
     get_workflow_run_detail,
+    import_review_testcases,
+    get_review_testcases,
+    set_review_status,
+    add_review_comment,
+    set_comment_resolved,
+    delete_review_comment,
 )
 from workflow_engine import run_workflow
 
@@ -2216,3 +2222,113 @@ async def tc_analysis_ai_deep(payload: DeepAiRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Review Bench — sign-off queue for generated regression testcases
+#
+# Testcases are generated on a workstation (out/<DT>/TC_*.py) and pushed here,
+# because this box has no copy of that tree. Everything a reviewer needs —
+# ticket context, the testcase source, the discussion — lives in the DB, so
+# review state is shared across everyone with the link.
+# ---------------------------------------------------------------------------
+
+class ReviewTestcase(BaseModel):
+    tc_key: str
+    dt: str
+    dt_url: str = ""
+    dt_summary: str = ""
+    dt_description: str = ""
+    component: str = ""
+    service: str = ""
+    priority: str = ""
+    jira_status: str = ""
+    fix_version: str = ""
+    tc_id: str = ""
+    tc_file: str = ""
+    tc_path: str = ""
+    tc_summary: str = ""
+    source: str = ""
+    flag: str | None = None
+    report_url: str | None = None
+
+
+class ReviewImportRequest(BaseModel):
+    items: list[ReviewTestcase]
+
+
+class ReviewStatusRequest(BaseModel):
+    status: str            # "reviewed" | "pending"
+    reviewer: str | None = None
+
+
+class ReviewCommentRequest(BaseModel):
+    author: str
+    kind: str = "change"   # "change" | "question" | "note"
+    body: str
+
+
+class CommentResolveRequest(BaseModel):
+    resolved: bool
+    actor: str | None = None
+
+
+@app.get("/review/testcases")
+async def review_list():
+    """Every testcase on the bench, each with its comment thread."""
+    return get_review_testcases()
+
+
+@app.post("/review/import")
+async def review_import(payload: ReviewImportRequest):
+    """
+    Push a batch of generated testcases onto the bench.
+
+    Re-pushing a ticket refreshes its metadata and source but leaves review
+    state and comments alone, so a regenerated testcase never silently
+    discards someone's sign-off.
+    """
+    items = [t.model_dump() for t in payload.items]
+    if not items:
+        raise HTTPException(status_code=400, detail="No testcases in payload")
+    return import_review_testcases(items)
+
+
+@app.patch("/review/testcases/{tc_key}/status")
+async def review_set_status(tc_key: str, payload: ReviewStatusRequest):
+    """Mark a testcase reviewed, or send it back to the queue."""
+    if payload.status not in ("reviewed", "pending"):
+        raise HTTPException(status_code=400, detail="status must be 'reviewed' or 'pending'")
+    if not set_review_status(tc_key, payload.status, payload.reviewer):
+        raise HTTPException(status_code=404, detail="Testcase not found")
+    return {"tc_key": tc_key, "status": payload.status}
+
+
+@app.post("/review/testcases/{tc_key}/comments")
+async def review_add_comment(tc_key: str, payload: ReviewCommentRequest):
+    """Post a comment on a testcase."""
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Comment body is empty")
+    if payload.kind not in ("change", "question", "note"):
+        raise HTTPException(status_code=400, detail="Unknown comment kind")
+    comment = add_review_comment(tc_key, payload.author, payload.kind, body)
+    if comment is None:
+        raise HTTPException(status_code=404, detail="Testcase not found")
+    return comment
+
+
+@app.patch("/review/comments/{comment_id}")
+async def review_resolve_comment(comment_id: int, payload: CommentResolveRequest):
+    """Resolve a comment (it stays on the record) or reopen it."""
+    if not set_comment_resolved(comment_id, payload.resolved, payload.actor):
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return {"id": comment_id, "resolved": payload.resolved}
+
+
+@app.delete("/review/comments/{comment_id}")
+async def review_delete_comment(comment_id: int):
+    """Remove a comment outright."""
+    if not delete_review_comment(comment_id):
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return {"id": comment_id, "deleted": True}

@@ -9,6 +9,7 @@ import WorkflowExecution from "@/components/WorkflowExecution";
 import TestReportDashboard from "@/components/TestReportDashboard";
 import ConfidenceDashboard from "@/components/ConfidenceDashboard";
 import TCAnalysis from "@/components/TCAnalysis";
+import ReviewBench from "@/components/ReviewBench";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +37,7 @@ type Page =
   | "test-report"
   | "confidence"
   | "tc-analysis"
+  | "review-bench"
   | "history"
   | "workflows"
   | "workflow-runs";
@@ -62,7 +64,8 @@ const PAGE_META: PageMeta[] = [
   { key: "test-report", label: "Test Report Summary", description: "Compare two Jenkins builds", shortcut: "2", icon: TestReportIcon, section: "Core" },
   { key: "confidence", label: "TC Confidence", description: "Pass-rate across multiple builds", shortcut: "3", icon: ConfidenceIcon, section: "Core" },
   { key: "tc-analysis", label: "TC Analysis", description: "Automation logs for a single test case", shortcut: "4", icon: TCAnalysisIcon, section: "Core" },
-  { key: "history", label: "History", description: "Past script executions and their logs", shortcut: "5", icon: HistoryIcon, section: "Core" },
+  { key: "review-bench", label: "Review Bench", description: "Sign off on generated regression testcases", shortcut: "5", icon: ReviewBenchIcon, section: "Core" },
+  { key: "history", label: "History", description: "Past script executions and their logs", shortcut: "6", icon: HistoryIcon, section: "Core" },
   { key: "workflows", label: "Workflow Builder", description: "Compose multi-step automations", shortcut: "6", icon: WorkflowIcon, section: "Workflows" },
   { key: "workflow-runs", label: "Workflow Runs", description: "Executions of saved workflows", shortcut: "7", icon: WorkflowRunsIcon, section: "Workflows" },
 ];
@@ -425,6 +428,16 @@ export default function Home() {
             shortcut="⌥4"
           />
 
+          {/* Review Bench */}
+          <SidebarItem
+            label="Review Bench"
+            icon={<ReviewBenchIcon />}
+            active={activePage === "review-bench"}
+            onClick={() => navigateTo("review-bench")}
+            collapsed={sidebarCollapsed}
+            shortcut="⌥5"
+          />
+
           {/* History */}
           <SidebarItem
             label="History"
@@ -432,7 +445,7 @@ export default function Home() {
             active={activePage === "history"}
             onClick={() => navigateTo("history")}
             collapsed={sidebarCollapsed}
-            shortcut="⌥5"
+            shortcut="⌥6"
           />
 
           {/* Workflows section */}
@@ -640,6 +653,7 @@ export default function Home() {
                 {activePage === "test-report" && <TestReportDashboard />}
                 {activePage === "confidence" && <ConfidenceDashboard />}
                 {activePage === "tc-analysis" && <TCAnalysis />}
+                {activePage === "review-bench" && <ReviewBench />}
                 {activePage === "history" && <RunHistory />}
                 {activePage === "workflows" && <WorkflowBuilder />}
                 {activePage === "workflow-runs" && <WorkflowExecution />}
@@ -1163,6 +1177,24 @@ function TCAnalysisIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
+      />
+    </svg>
+  );
+}
+
+function ReviewBenchIcon() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z"
       />
     </svg>
   );

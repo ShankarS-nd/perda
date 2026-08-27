@@ -19,6 +19,14 @@ Provides:
   update_workflow_step()   → update a step result
   get_workflow_runs()      → last N runs
   get_workflow_run()       → single run + steps
+
+  Review bench (generated regression testcases awaiting sign-off):
+  import_review_testcases()  → upsert a pushed batch, preserving review state
+  get_review_testcases()     → every testcase with its comments
+  set_review_status()        → mark reviewed / back to pending
+  add_review_comment()       → post a comment on a testcase
+  set_comment_resolved()     → resolve / reopen a comment
+  delete_review_comment()    → remove a comment
 """
 
 from __future__ import annotations
@@ -93,6 +101,51 @@ def init_db() -> None:
                 retry_attempts  INTEGER NOT NULL DEFAULT 0,
                 output_json     TEXT    NOT NULL DEFAULT '{}'
             );
+
+            -- Review bench -------------------------------------------------
+            -- One row per generated testcase awaiting human sign-off. `tc_key`
+            -- is the stable "DT-2029:TC_5001" identity, so re-pushing a ticket
+            -- updates the metadata in place and never disturbs review state.
+            CREATE TABLE IF NOT EXISTS review_testcases (
+                id              INTEGER  PRIMARY KEY AUTOINCREMENT,
+                tc_key          TEXT     NOT NULL UNIQUE,
+                dt              TEXT     NOT NULL,
+                dt_url          TEXT     NOT NULL DEFAULT '',
+                dt_summary      TEXT     NOT NULL DEFAULT '',
+                dt_description  TEXT     NOT NULL DEFAULT '',
+                component       TEXT     NOT NULL DEFAULT '',
+                service         TEXT     NOT NULL DEFAULT '',
+                priority        TEXT     NOT NULL DEFAULT '',
+                jira_status     TEXT     NOT NULL DEFAULT '',
+                fix_version     TEXT     NOT NULL DEFAULT '',
+                tc_id           TEXT     NOT NULL DEFAULT '',
+                tc_file         TEXT     NOT NULL DEFAULT '',
+                tc_path         TEXT     NOT NULL DEFAULT '',
+                tc_summary      TEXT     NOT NULL DEFAULT '',
+                source          TEXT     NOT NULL DEFAULT '',
+                flag            TEXT,
+                report_url      TEXT,
+                review_status   TEXT     NOT NULL DEFAULT 'pending',
+                reviewed_by     TEXT,
+                reviewed_at     DATETIME,
+                pushed_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS review_comments (
+                id           INTEGER  PRIMARY KEY AUTOINCREMENT,
+                testcase_id  INTEGER  NOT NULL REFERENCES review_testcases(id) ON DELETE CASCADE,
+                author       TEXT     NOT NULL DEFAULT '',
+                kind         TEXT     NOT NULL DEFAULT 'change',
+                body         TEXT     NOT NULL DEFAULT '',
+                resolved     INTEGER  NOT NULL DEFAULT 0,
+                resolved_by  TEXT,
+                resolved_at  DATETIME,
+                created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_review_comments_tc
+                ON review_comments(testcase_id);
         """)
         conn.commit()
     finally:
@@ -375,5 +428,180 @@ def get_workflow_run_detail(run_id: int) -> dict[str, Any] | None:
         ).fetchall()
         result["steps"] = [dict(s) for s in steps]
         return result
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Review bench
+# ---------------------------------------------------------------------------
+
+# Metadata columns are owned by the generator and refreshed on every push;
+# review state (status / who / when, and all comments) is owned by the
+# reviewers and must survive a re-push untouched.
+_REVIEW_META_COLUMNS = (
+    "dt", "dt_url", "dt_summary", "dt_description", "component", "service",
+    "priority", "jira_status", "fix_version", "tc_id", "tc_file", "tc_path",
+    "tc_summary", "source", "flag", "report_url",
+)
+
+
+def import_review_testcases(items: list[dict[str, Any]]) -> dict[str, int]:
+    """
+    Upsert a pushed batch of generated testcases.
+
+    Each item is keyed by `tc_key` ("DT-2029:TC_5001"). An unseen key is
+    inserted as pending; a known key has only its metadata refreshed, so a
+    reviewer's sign-off and comments are never lost by re-pushing a ticket.
+
+    Returns {"added": n, "updated": n}.
+    """
+    added = updated = 0
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _connect()
+    try:
+        for item in items:
+            key = str(item.get("tc_key") or "").strip()
+            if not key:
+                continue
+            values = [item.get(col) if item.get(col) is not None else
+                      (None if col in ("flag", "report_url") else "")
+                      for col in _REVIEW_META_COLUMNS]
+
+            row = conn.execute(
+                "SELECT id FROM review_testcases WHERE tc_key = ?", (key,)
+            ).fetchone()
+
+            if row:
+                assignments = ", ".join(f"{c} = ?" for c in _REVIEW_META_COLUMNS)
+                conn.execute(
+                    f"UPDATE review_testcases SET {assignments}, updated_at = ? WHERE tc_key = ?",
+                    (*values, now, key),
+                )
+                updated += 1
+            else:
+                cols = ", ".join(_REVIEW_META_COLUMNS)
+                marks = ", ".join("?" for _ in _REVIEW_META_COLUMNS)
+                conn.execute(
+                    f"""
+                    INSERT INTO review_testcases
+                        (tc_key, {cols}, review_status, pushed_at, updated_at)
+                    VALUES (?, {marks}, 'pending', ?, ?)
+                    """,
+                    (key, *values, now, now),
+                )
+                added += 1
+        conn.commit()
+        return {"added": added, "updated": updated}
+    finally:
+        conn.close()
+
+
+def get_review_testcases() -> list[dict[str, Any]]:
+    """Every testcase on the bench, each with its comment thread attached."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM review_testcases ORDER BY dt, tc_id"
+        ).fetchall()
+        cases = [dict(r) for r in rows]
+
+        threads: dict[int, list[dict[str, Any]]] = {}
+        for c in conn.execute(
+            "SELECT * FROM review_comments ORDER BY created_at ASC"
+        ).fetchall():
+            comment = dict(c)
+            comment["resolved"] = bool(comment["resolved"])
+            threads.setdefault(comment["testcase_id"], []).append(comment)
+
+        for case in cases:
+            case["comments"] = threads.get(case["id"], [])
+        return cases
+    finally:
+        conn.close()
+
+
+def set_review_status(tc_key: str, status: str, reviewer: str | None) -> bool:
+    """Mark a testcase reviewed, or send it back to the queue."""
+    reviewed = status == "reviewed"
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            """
+            UPDATE review_testcases
+               SET review_status = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ?
+             WHERE tc_key = ?
+            """,
+            (
+                "reviewed" if reviewed else "pending",
+                reviewer if reviewed else None,
+                datetime.now(timezone.utc).isoformat() if reviewed else None,
+                datetime.now(timezone.utc).isoformat(),
+                tc_key,
+            ),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def add_review_comment(tc_key: str, author: str, kind: str, body: str) -> dict[str, Any] | None:
+    """Post a comment on a testcase. Returns the stored comment, or None if unknown."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT id FROM review_testcases WHERE tc_key = ?", (tc_key,)
+        ).fetchone()
+        if not row:
+            return None
+        cur = conn.execute(
+            """
+            INSERT INTO review_comments (testcase_id, author, kind, body, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (row["id"], author, kind, body, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        saved = conn.execute(
+            "SELECT * FROM review_comments WHERE id = ?", (cur.lastrowid,)
+        ).fetchone()
+        comment = dict(saved)
+        comment["resolved"] = bool(comment["resolved"])
+        return comment
+    finally:
+        conn.close()
+
+
+def set_comment_resolved(comment_id: int, resolved: bool, actor: str | None) -> bool:
+    """Resolve a comment (keeping it on the record) or reopen it."""
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            """
+            UPDATE review_comments
+               SET resolved = ?, resolved_by = ?, resolved_at = ?
+             WHERE id = ?
+            """,
+            (
+                1 if resolved else 0,
+                actor if resolved else None,
+                datetime.now(timezone.utc).isoformat() if resolved else None,
+                comment_id,
+            ),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_review_comment(comment_id: int) -> bool:
+    """Remove a comment outright. Deletion is the one action Undo cannot reverse."""
+    conn = _connect()
+    try:
+        cur = conn.execute("DELETE FROM review_comments WHERE id = ?", (comment_id,))
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
