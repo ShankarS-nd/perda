@@ -300,9 +300,21 @@ export default function ReviewBench() {
     setAskName(true);
     return true;
   };
+  const clearName = () => {
+    setReviewer("");
+    try { localStorage.removeItem("perda-review-reviewer"); } catch {}
+    pendingAction.current = null;   // whatever was waiting on a name is abandoned
+    setAskName(false);
+    note("info", "Name removed");
+  };
+
   const saveName = () => {
     const v = nameDraft.trim();
-    if (!v) return;
+    if (!v) {
+      // Emptying the field and saving is the other way people expect to clear it.
+      if (reviewer) clearName();
+      return;
+    }
     setReviewer(v);
     try { localStorage.setItem("perda-review-reviewer", v); } catch {}
     setAskName(false);
@@ -937,9 +949,19 @@ export default function ReviewBench() {
               onChange={(e) => setNameDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && saveName()}
             />
-            <div className="mt-5 flex justify-end gap-3">
-              <button className="ds-btn-secondary" onClick={() => setAskName(false)}>Cancel</button>
-              <button className="ds-btn-primary" onClick={saveName}>Save</button>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              {reviewer ? (
+                <button
+                  className="text-[13px] text-gray-500 transition-colors hover:text-rose-400"
+                  onClick={clearName}
+                >
+                  Remove name
+                </button>
+              ) : <span />}
+              <div className="flex gap-3">
+                <button className="ds-btn-secondary" onClick={() => setAskName(false)}>Cancel</button>
+                <button className="ds-btn-primary" onClick={saveName}>Save</button>
+              </div>
             </div>
           </div>
         </div>,
