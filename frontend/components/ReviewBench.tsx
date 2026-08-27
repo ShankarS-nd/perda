@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 // ---------------------------------------------------------------------------
 // Review Bench — sign-off queue for generated regression testcases.
@@ -185,6 +186,7 @@ export default function ReviewBench() {
   const [openWhy, setOpenWhy] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [mounted, setMounted] = useState(false);
 
   const pendingAction = useRef<(() => void) | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -199,6 +201,8 @@ export default function ReviewBench() {
       setTimeout(() => setNotes((p) => p.filter((n) => n.id !== id)), 280);
     }, ms);
   }, []);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     try {
@@ -409,49 +413,53 @@ export default function ReviewBench() {
     return () => window.removeEventListener("keydown", onKey);
   }, [current, move]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // -------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
 
   if (loading) {
     return (
-      <div className="ds-loading flex items-center justify-center py-24 text-sm text-gray-500">
+      <div className="flex items-center justify-center py-32 text-[15px] text-gray-500">
         Loading the review bench…
       </div>
     );
   }
 
+  const pct = counts.all ? Math.round((counts.reviewed / counts.all) * 100) : 0;
+
   return (
     <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 8.5rem)" }}>
-      {/* toolbar ---------------------------------------------------------- */}
+      {/* ── one row of controls ─────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-1">
-          {QUEUES.map((q) => (
-            <button
-              key={q.key}
-              onClick={() => { setQueue(q.key); }}
-              className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-[14px] transition-colors ${
-                queue === q.key
-                  ? "bg-indigo-500/15 text-indigo-300 font-semibold"
-                  : "text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${q.dot}`} />
-              {q.label}
-              <span className="font-mono text-[11px] tabular-nums opacity-70">
-                {counts[q.key === "comments" ? "comments" : q.key]}
-              </span>
-            </button>
-          ))}
+        <div className="flex items-center gap-0.5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-1">
+          {QUEUES.map((q) => {
+            const on = queue === q.key;
+            return (
+              <button
+                key={q.key}
+                onClick={() => setQueue(q.key)}
+                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-[14px] transition-colors ${
+                  on ? "bg-indigo-500/15 font-semibold text-indigo-300" : "text-gray-400 hover:text-gray-100"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${q.dot}`} />
+                {q.label}
+                <span className="font-mono text-[12px] tabular-nums opacity-60">
+                  {counts[q.key === "comments" ? "comments" : q.key]}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <input
-          className="ds-input flex-1 min-w-[220px]"
+          className="ds-input min-w-[240px] flex-1 text-[14.5px]"
           placeholder="Search testcases, tickets, code, comments"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
 
         <button
-          className="ds-btn-secondary"
+          className="ds-btn-secondary text-[14px]"
           onClick={() => { setNameDraft(reviewer); setAskName(true); }}
           title="Everything you sign off or comment on is attributed to this name"
         >
@@ -460,83 +468,60 @@ export default function ReviewBench() {
         </button>
       </div>
 
-      {/* ticket chips + progress ------------------------------------------ */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setDtFilter(null)}
-          className={`rounded-lg border px-2.5 py-1 font-mono text-[11px] transition-colors ${
-            !dtFilter
-              ? "border-indigo-500/40 bg-indigo-500/10 text-indigo-300"
-              : "border-white/[0.07] text-gray-500 hover:text-gray-300"
-          }`}
-        >
-          All tickets
-        </button>
-        {tickets.map((t) => (
-          <span key={t.dt} className="inline-flex items-center">
-            <button
-              onClick={() => setDtFilter(dtFilter === t.dt ? null : t.dt)}
-              className={`rounded-l-lg border border-r-0 px-2.5 py-1 font-mono text-[11px] transition-colors ${
-                dtFilter === t.dt
-                  ? "border-indigo-500/40 bg-indigo-500/10 text-indigo-300"
-                  : "border-white/[0.07] text-gray-500 hover:text-gray-300"
-              }`}
-            >
-              {t.dt}
-              <span className="ml-2 opacity-70">{t.pending}/{t.n}</span>
-            </button>
-            <a
-              href={t.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={`Open ${t.dt} in Jira`}
-              className={`rounded-r-lg border px-2 py-1 text-[11px] transition-colors ${
-                dtFilter === t.dt
-                  ? "border-indigo-500/40 bg-indigo-500/10 text-indigo-300"
-                  : "border-white/[0.07] text-gray-600 hover:text-indigo-300"
-              }`}
-            >
-              <IconExternal />
-            </a>
-          </span>
-        ))}
-        <span className="ml-auto flex items-center gap-3">
-          <span className="h-1.5 w-28 overflow-hidden rounded-full bg-white/[0.07]">
-            <span
-              className="block h-full rounded-full bg-emerald-500 transition-all duration-500"
-              style={{ width: `${counts.all ? (counts.reviewed / counts.all) * 100 : 0}%` }}
-            />
-          </span>
-          <span className="font-mono text-[11px] tabular-nums text-gray-500">
-            {counts.reviewed} of {counts.all} reviewed
-          </span>
-        </span>
-      </div>
-
       {error && (
-        <div className="ds-card border-amber-500/25 px-4 py-3 text-[13px] text-amber-300">
-          {error}
-        </div>
+        <div className="ds-card border-amber-500/25 px-5 py-4 text-[14px] text-amber-300">{error}</div>
       )}
 
-      {/* two panes -------------------------------------------------------- */}
-      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[352px_minmax(0,1fr)]">
-        {/* queue */}
+      {/* ── queue + testcase ────────────────────────────────────────────── */}
+      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[356px_minmax(0,1fr)]">
+        {/* queue ------------------------------------------------------- */}
         <div className="ds-card flex min-h-0 flex-col overflow-hidden">
-          <div className="ds-card-header flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-              {QUEUES.find((q) => q.key === queue)?.label}
-              {dtFilter ? ` · ${dtFilter}` : ""}
-            </span>
-            <span className="font-mono text-[11px] tabular-nums text-gray-600">{visible.length}</span>
+          <div className="flex items-center gap-3 border-b border-white/[0.055] px-5 py-3.5">
+            <select
+              value={dtFilter ?? ""}
+              onChange={(e) => setDtFilter(e.target.value || null)}
+              className="ds-input min-w-0 flex-1 cursor-pointer py-1.5 font-mono text-[13px]"
+            >
+              <option value="">All tickets · {counts.all}</option>
+              {tickets.map((t) => (
+                <option key={t.dt} value={t.dt}>
+                  {t.dt} · {t.pending} of {t.n} left
+                </option>
+              ))}
+            </select>
+            {dtFilter && (
+              <a
+                href={tickets.find((t) => t.dt === dtFilter)?.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open ${dtFilter} in Jira`}
+                className="shrink-0 rounded-lg border border-white/[0.08] p-2 text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
+              >
+                <IconExternal />
+              </a>
+            )}
           </div>
+
+          {/* progress — the one number worth always knowing */}
+          <div className="flex items-center gap-3 border-b border-white/[0.055] px-5 py-2.5">
+            <span className="h-1 flex-1 overflow-hidden rounded-full bg-white/[0.07]">
+              <span
+                className="block h-full rounded-full bg-emerald-500 transition-all duration-500"
+                style={{ width: `${pct}%` }}
+              />
+            </span>
+            <span className="font-mono text-[11.5px] tabular-nums text-gray-500">
+              {counts.reviewed}/{counts.all}
+            </span>
+          </div>
+
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
             {visible.length === 0 ? (
               <div className="px-6 py-16 text-center text-[14.5px] leading-relaxed text-gray-600">
                 {query
                   ? `Nothing matches “${query}” here.`
                   : queue === "pending"
-                  ? "Every testcase in view has been reviewed."
+                  ? "Everything in view has been reviewed."
                   : queue === "comments"
                   ? "Nothing is waiting on a change or an answer."
                   : queue === "reviewed"
@@ -551,77 +536,81 @@ export default function ReviewBench() {
                 return (
                   <div key={t.tc_key}>
                     {first && (
-                      <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-white/[0.055] bg-[#171a24]/95 px-5 py-2.5 backdrop-blur">
+                      <div className="sticky top-0 z-10 flex items-center gap-2.5 border-y border-white/[0.055] bg-[#171a24]/95 px-5 py-2.5 backdrop-blur">
                         <span className="font-mono text-[12px] font-semibold text-gray-400">{t.dt}</span>
                         <span className="h-px flex-1 bg-white/[0.06]" />
-                        <span className="font-mono text-[10px] tabular-nums text-gray-600">
+                        <span className="font-mono text-[11px] tabular-nums text-gray-600">
                           {visible.filter((x) => x.dt === t.dt).length}
                         </span>
                       </div>
                     )}
                     <button
                       onClick={() => { setSel(t.tc_key); detailRef.current?.scrollTo({ top: 0 }); }}
-                      className={`relative block w-full border-b border-white/[0.05] px-5 py-4 text-left transition-colors ${
-                        active ? "bg-indigo-500/10" : "hover:bg-white/[0.025]"
+                      className={`relative flex w-full items-center gap-3 border-b border-white/[0.05] px-5 py-3.5 text-left transition-colors ${
+                        active ? "bg-indigo-500/10" : "hover:bg-white/[0.03]"
                       }`}
                     >
                       {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-indigo-400" />}
-                      <span className="mb-1.5 flex items-center gap-2.5">
-                        <span
-                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                            t.review_status === "reviewed" ? "bg-emerald-400" : "bg-amber-400"
-                          }`}
-                        />
-                        <span className={`font-mono text-[14px] font-semibold ${active ? "text-indigo-300" : "text-gray-200"}`}>
-                          {t.tc_id}
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${
+                          t.review_status === "reviewed" ? "bg-emerald-400" : "bg-amber-400"
+                        }`}
+                      />
+                      <span
+                        className={`min-w-0 flex-1 truncate font-mono text-[14.5px] font-semibold ${
+                          active ? "text-indigo-300" : "text-gray-200"
+                        }`}
+                      >
+                        {t.tc_id}
+                      </span>
+                      {nOpen > 0 && (
+                        <span className="shrink-0 rounded-md bg-indigo-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-300">
+                          {nOpen}
                         </span>
-                        <span className="h-px flex-1" />
-                        {nOpen > 0 && (
-                          <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-300">
-                            {nOpen}
-                          </span>
-                        )}
-                        {t.flag && (
-                          <span className="rounded bg-rose-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-rose-300">
-                            !
-                          </span>
-                        )}
-                      </span>
-                      <span className="line-clamp-2 block text-[13.5px] leading-relaxed text-gray-500">
-                        {t.tc_summary}
-                      </span>
+                      )}
+                      {t.flag && (
+                        <span
+                          title={t.flag}
+                          className="shrink-0 rounded-md bg-rose-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-rose-300"
+                        >
+                          !
+                        </span>
+                      )}
                     </button>
                   </div>
                 );
               })
             )}
           </div>
-          <div className="flex flex-wrap gap-3 border-t border-white/[0.055] px-4 py-2 font-mono text-[10px] text-gray-600">
+
+          <div className="flex flex-wrap gap-4 border-t border-white/[0.055] px-5 py-2.5 font-mono text-[11px] text-gray-600">
             <span><b className="text-gray-400">J</b>/<b className="text-gray-400">K</b> move</span>
             <span><b className="text-gray-400">R</b> review</span>
             <span><b className="text-gray-400">C</b> comment</span>
           </div>
         </div>
 
-        {/* detail */}
+        {/* testcase ---------------------------------------------------- */}
         {current ? (
           <div className="flex min-h-0 flex-col gap-5">
-            {/* sticky action bar */}
+            {/* action bar */}
             <div className="ds-card flex flex-wrap items-center gap-4 px-6 py-4">
               <div className="min-w-0">
-                <div className="flex items-center gap-2.5">
-                  <span className="font-mono text-[18px] font-semibold text-gray-100">{current.tc_id}</span>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-mono text-[19px] font-semibold tracking-tight text-gray-100">
+                    {current.tc_id}
+                  </span>
                   <span className={`ds-badge ${current.review_status === "reviewed" ? "ds-badge-success" : "ds-badge-warning"}`}>
                     {current.review_status === "reviewed" ? "Reviewed" : "Needs review"}
                   </span>
-                  {openOf(current) > 0 && (
-                    <span className="ds-badge ds-badge-info">{openOf(current)} open</span>
-                  )}
+                  {openOf(current) > 0 && <span className="ds-badge ds-badge-info">{openOf(current)} open</span>}
                   {current.flag && (
-                    <span className="ds-badge ds-badge-error">{current.flag.split(" — ")[0]}</span>
+                    <span className="ds-badge ds-badge-error" title={current.flag}>
+                      {current.flag.split(" — ")[0]}
+                    </span>
                   )}
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-[12.5px] text-gray-600">
+                <div className="mt-2 flex flex-wrap items-center gap-2.5 text-[13px] text-gray-500">
                   <a
                     href={current.dt_url}
                     target="_blank"
@@ -631,80 +620,73 @@ export default function ReviewBench() {
                     {current.dt}
                     <IconExternal />
                   </a>
-                  <span>·</span><span>{current.component}</span>
-                  <span>·</span><span>{current.fix_version}</span>
-                  <span>·</span><span className="tabular-nums">{idx + 1} of {visible.length}</span>
+                  <span className="text-gray-700">·</span><span>{current.component}</span>
+                  <span className="text-gray-700">·</span><span>{current.fix_version}</span>
+                  <span className="text-gray-700">·</span>
+                  <span className="tabular-nums">{idx + 1} of {visible.length}</span>
                 </div>
               </div>
-              <div className="ml-auto flex items-center gap-2">
+
+              <div className="ml-auto flex items-center gap-2.5">
                 <div className="flex overflow-hidden rounded-lg border border-white/[0.08]">
                   <button
                     onClick={() => move(-1)}
                     disabled={idx <= 0}
-                    className="px-2.5 py-1.5 text-gray-500 transition-colors hover:text-indigo-300 disabled:opacity-30"
+                    className="px-3 py-2 text-gray-500 transition-colors hover:text-indigo-300 disabled:opacity-25"
                     aria-label="Previous testcase"
                   ><IconUp /></button>
                   <button
                     onClick={() => move(1)}
                     disabled={idx >= visible.length - 1}
-                    className="border-l border-white/[0.08] px-2.5 py-1.5 text-gray-500 transition-colors hover:text-indigo-300 disabled:opacity-30"
+                    className="border-l border-white/[0.08] px-3 py-2 text-gray-500 transition-colors hover:text-indigo-300 disabled:opacity-25"
                     aria-label="Next testcase"
                   ><IconDown /></button>
                 </div>
                 <button
-                  className="ds-btn-secondary"
+                  className="ds-btn-secondary text-[14px]"
                   onClick={() => { composerRef.current?.scrollIntoView({ block: "center" }); composerRef.current?.focus(); }}
                 >
                   Comment
                 </button>
                 {current.review_status === "reviewed" ? (
-                  <button className="ds-btn-secondary" onClick={() => setStatus(current, "pending")}>
+                  <button className="ds-btn-secondary text-[14px]" onClick={() => setStatus(current, "pending")}>
                     Undo review
                   </button>
                 ) : (
-                  <button className="ds-btn-primary" onClick={() => setStatus(current, "reviewed")}>
+                  <button className="ds-btn-primary text-[14px]" onClick={() => setStatus(current, "reviewed")}>
                     Mark reviewed
                   </button>
                 )}
               </div>
             </div>
 
-            {/* scrolling detail body */}
             <div ref={detailRef} className="main-content flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-2">
-              {/* ticket */}
+              {/* context — ticket and testcase in one card, not two */}
               <section className="ds-card">
-                <div className="ds-card-header flex items-center justify-between">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Ticket</span>
-                  <a
-                    href={current.dt_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono text-[12px] font-semibold text-indigo-400 hover:underline"
-                  >
-                    {current.dt}
-                    <IconExternal />
-                  </a>
-                </div>
                 <div className="p-7">
-                  <h2 className="mb-4 max-w-[62ch] text-[19px] font-semibold leading-snug text-gray-100">
+                  <h2 className="max-w-[62ch] text-[20px] font-semibold leading-snug tracking-tight text-gray-100">
                     {current.dt_summary}
                   </h2>
-                  <div className="mb-5 flex flex-wrap gap-2">
+
+                  <div className="mt-5 flex flex-wrap gap-2">
                     {[
                       ["Component", current.component],
                       ["Fix version", current.fix_version],
                       ["Priority", current.priority],
                       ["Jira", current.jira_status],
-                      ["Service", current.service],
                     ].filter(([, v]) => v).map(([k, v]) => (
-                      <span key={k} className="rounded-md border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 font-mono text-[11.5px] text-gray-400">
+                      <span
+                        key={k}
+                        className="rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 font-mono text-[12px] text-gray-400"
+                      >
                         <span className="mr-2 uppercase tracking-wider text-gray-600">{k}</span>{v}
                       </span>
                     ))}
                   </div>
+
                   <button
                     onClick={() => setOpenWhy((p) => ({ ...p, [current.dt]: !p[current.dt] }))}
-                    className="flex items-center gap-2.5 text-[13px] text-gray-500 transition-colors hover:text-indigo-300"
+                    className="mt-5 flex items-center gap-2.5 text-[13.5px] text-gray-500 transition-colors hover:text-indigo-300"
                     aria-expanded={!!openWhy[current.dt]}
                   >
                     <IconChevron open={!!openWhy[current.dt]} />
@@ -715,65 +697,69 @@ export default function ReviewBench() {
                       {current.dt_description}
                     </p>
                   )}
-                </div>
-              </section>
 
-              {/* what it does */}
-              <section className="ds-card">
-                <div className="ds-card-header">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-                    What this testcase does
-                  </span>
-                </div>
-                <div className="p-7">
-                  <p className="max-w-[72ch] text-[15.5px] leading-[1.7] text-gray-300">{current.tc_summary}</p>
-                  <div className="mt-4 grid gap-px overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.07] sm:grid-cols-2">
-                    <Meta label="Testcase file" value={current.tc_file} title={current.tc_path}
-                          onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
-                    <Meta label="Test report" value={current.report_url ?? "not linked yet"}
-                          muted={!current.report_url}
-                          href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
-                    <Meta label="Pushed" value={fmtDate(current.pushed_at)} />
-                    {current.flag && (
-                      <div className="bg-[#1a1d28] p-3.5 sm:col-span-2">
-                        <div className="mb-1.5 font-mono text-[9px] uppercase tracking-widest text-gray-600">Flag</div>
-                        <div className="text-[12px] leading-relaxed text-rose-300">{current.flag}</div>
-                      </div>
-                    )}
+                  <div className="mt-7 border-t border-white/[0.06] pt-6">
+                    <div className="mb-3 font-mono text-[11px] uppercase tracking-widest text-gray-600">
+                      What this testcase does
+                    </div>
+                    <p className="max-w-[72ch] text-[15.5px] leading-[1.75] text-gray-300">
+                      {current.tc_summary}
+                    </p>
+
+                    <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+                      <Field label="File" mono value={current.tc_file} title={current.tc_path}
+                             onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
+                      <Field label="Test report" mono muted={!current.report_url}
+                             value={current.report_url ?? "not linked yet"}
+                             href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
+                      <Field label="Pushed" mono value={fmtDate(current.pushed_at)} />
+                      {current.review_status === "reviewed" && (
+                        <Field label="Signed off" mono
+                               value={`${current.reviewed_by ?? "someone"} · ${fmtDate(current.reviewed_at)}`} />
+                      )}
+                      {current.flag && (
+                        <div className="sm:col-span-2">
+                          <dt className="mb-1.5 font-mono text-[10.5px] uppercase tracking-widest text-gray-600">Flag</dt>
+                          <dd className="max-w-[70ch] text-[14px] leading-relaxed text-rose-300/90">{current.flag}</dd>
+                        </div>
+                      )}
+                    </dl>
                   </div>
                 </div>
               </section>
 
               {/* source */}
               <section className="ds-card overflow-hidden">
-                <div className="ds-card-header flex items-center justify-between">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                <div className="flex items-center gap-4 border-b border-white/[0.055] px-6 py-3.5">
+                  <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">
                     Testcase source
                   </span>
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-[10px] uppercase tracking-wider text-gray-600">
+                  <span className="truncate font-mono text-[12px] text-gray-600">{current.tc_path}</span>
+                  <span className="ml-auto flex shrink-0 items-center gap-3">
+                    <span className="font-mono text-[11px] tabular-nums text-gray-600">
                       {current.source ? `${current.source.split("\n").length} lines` : "not pushed"}
                     </span>
                     {current.source && (
                       <>
                         <button
-                          className="rounded border border-white/[0.08] px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
+                          className="rounded-md border border-white/[0.08] px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
                           onClick={() => { navigator.clipboard?.writeText(current.source); note("info", "File copied"); }}
                         >
-                          Copy file
+                          Copy
                         </button>
                         <button
-                          className="font-mono text-[9px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
+                          className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
                           onClick={() => setFoldSrc((p) => ({ ...p, [current.tc_key]: !p[current.tc_key] }))}
                         >
-                          {foldSrc[current.tc_key] ? "Expand" : "Collapse"}
+                          <IconChevron open={!foldSrc[current.tc_key]} />
+                          {foldSrc[current.tc_key] ? "Show" : "Hide"}
                         </button>
                       </>
                     )}
-                  </div>
+                  </span>
                 </div>
-                {!foldSrc[current.tc_key] && (
-                  current.source ? (
+                {!foldSrc[current.tc_key] &&
+                  (current.source ? (
                     <div className="scrollbar-thin max-h-[60vh] overflow-auto bg-[#0d0f16]">
                       <div className="flex min-w-min items-start font-mono text-[13px] leading-[1.75]">
                         <div className="sticky left-0 z-10 shrink-0 select-none whitespace-pre border-r border-white/[0.06] bg-[#0b0d13] px-4 py-5 text-right text-gray-700 tabular-nums">
@@ -786,26 +772,24 @@ export default function ReviewBench() {
                       </div>
                     </div>
                   ) : (
-                    <div className="p-6 text-[13px] text-gray-600">
+                    <div className="p-7 text-[14px] text-gray-600">
                       The file was not included in this push, so there is nothing to show yet.
                     </div>
-                  )
-                )}
+                  ))}
               </section>
 
               {/* discussion */}
               <section className="ds-card">
-                <div className="ds-card-header flex items-center gap-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Discussion</span>
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-gray-600">
+                <div className="flex items-center gap-4 border-b border-white/[0.055] px-6 py-3.5">
+                  <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">Discussion</span>
+                  <span className="font-mono text-[12px] text-gray-600">
                     {current.comments.length
                       ? `${current.comments.length} comment${current.comments.length === 1 ? "" : "s"}`
                       : "none yet"}
                   </span>
-                  <span className="h-px flex-1 bg-white/[0.05]" />
                   {current.comments.some((c) => c.resolved) && (
                     <button
-                      className="font-mono text-[9.5px] uppercase tracking-wider text-gray-500 hover:text-indigo-300"
+                      className="ml-auto font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
                       onClick={() => setShowResolved((p) => ({ ...p, [current.tc_key]: !p[current.tc_key] }))}
                     >
                       {showResolved[current.tc_key] ? "Hide" : "Show"}{" "}
@@ -813,12 +797,12 @@ export default function ReviewBench() {
                     </button>
                   )}
                 </div>
+
                 <div className="p-7">
                   {current.comments.length === 0 && (
-                    <p className="mb-6 max-w-[60ch] text-[15px] leading-[1.7] text-gray-500">
-                      No comments yet. If something needs changing before this testcase ships, or
-                      you have a question about how it works, write it below — everyone reviewing
-                      will see it.
+                    <p className="mb-7 max-w-[60ch] text-[15px] leading-[1.7] text-gray-500">
+                      Nothing raised yet. If something needs changing before this testcase ships,
+                      or you want to ask how it works, write it below — everyone reviewing sees it.
                     </p>
                   )}
 
@@ -827,43 +811,46 @@ export default function ReviewBench() {
                     .map((c) => (
                       <div
                         key={c.id}
-                        className={`border-b border-white/[0.05] py-5 first:pt-0 last:border-0 ${c.resolved ? "opacity-60" : ""}`}
+                        className={`border-b border-white/[0.05] py-6 first:pt-0 last:border-0 last:pb-0 ${c.resolved ? "opacity-55" : ""}`}
                       >
-                        <div className="mb-2 flex flex-wrap items-center gap-2.5">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-500/15 text-[11px] font-semibold text-indigo-300">
+                        <div className="mb-3 flex flex-wrap items-center gap-3">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/15 text-[12px] font-semibold text-indigo-300">
                             {initials(c.author)}
                           </span>
-                          <span className="text-[14.5px] font-semibold text-gray-200">{c.author || "Someone"}</span>
-                          <span className={`ds-badge ${
-                            c.kind === "change" ? "ds-badge-error"
-                            : c.kind === "question" ? "ds-badge-info"
-                            : "ds-badge-neutral"}`}>
+                          <span className="text-[15px] font-semibold text-gray-200">{c.author || "Someone"}</span>
+                          <span
+                            className={`ds-badge ${
+                              c.kind === "change" ? "ds-badge-error"
+                              : c.kind === "question" ? "ds-badge-info"
+                              : "ds-badge-neutral"
+                            }`}
+                          >
                             {KINDS.find((k) => k.key === c.kind)?.label ?? "Note"}
                           </span>
-                          <span className="font-mono text-[10.5px] tabular-nums text-gray-600">
+                          <span className="font-mono text-[11.5px] tabular-nums text-gray-600">
                             {fmtWhen(c.created_at)}
                           </span>
                         </div>
-                        <div className="max-w-[68ch] whitespace-pre-wrap pl-[38px] text-[15.5px] leading-[1.75] text-gray-300">
+                        <div className="max-w-[68ch] whitespace-pre-wrap pl-11 text-[15.5px] leading-[1.75] text-gray-300">
                           {c.body}
                         </div>
-                        <div className="mt-2.5 flex flex-wrap items-center gap-4 pl-[34px]">
+                        <div className="mt-3.5 flex flex-wrap items-center gap-5 pl-11">
                           <button
-                            className="text-[12.5px] text-gray-500 transition-colors hover:text-indigo-300"
+                            className="text-[13px] text-gray-500 transition-colors hover:text-indigo-300"
                             onClick={() => resolveComment(c, !c.resolved)}
                           >
                             {c.resolved ? "Reopen" : "Mark resolved"}
                           </button>
                           {reviewer && c.author === reviewer && (
                             <button
-                              className="text-[12.5px] text-gray-500 transition-colors hover:text-rose-400"
+                              className="text-[13px] text-gray-500 transition-colors hover:text-rose-400"
                               onClick={() => (confirmDel === c.id ? removeComment(c) : setConfirmDel(c.id))}
                             >
                               {confirmDel === c.id ? "Really delete?" : "Delete"}
                             </button>
                           )}
                           {c.resolved && (
-                            <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-emerald-400">
+                            <span className="flex items-center gap-1.5 font-mono text-[12px] text-emerald-400">
                               <IconCheck />
                               resolved by {c.resolved_by ?? "someone"}
                             </span>
@@ -872,24 +859,23 @@ export default function ReviewBench() {
                       </div>
                     ))}
 
-                  {/* composer — always on screen, never behind a tab or a button */}
-                  <div className="mt-7 max-w-[72ch]">
+                  <div className="mt-8 max-w-[72ch]">
                     <textarea
                       ref={composerRef}
-                      className="ds-input min-h-[116px] w-full resize-y text-[15px] leading-[1.7]"
+                      className="ds-input min-h-[120px] w-full resize-y text-[15.5px] leading-[1.7]"
                       placeholder="What needs changing, or what do you want to ask about this testcase?"
                       value={drafts[current.tc_key] ?? ""}
                       onChange={(e) => setDrafts((p) => ({ ...p, [current.tc_key]: e.target.value }))}
                     />
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex gap-1.5">
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex gap-2">
                         {KINDS.map((k) => {
                           const on = (kinds[current.tc_key] ?? "change") === k.key;
                           return (
                             <button
                               key={k.key}
                               onClick={() => setKinds((p) => ({ ...p, [current.tc_key]: k.key }))}
-                              className={`rounded-md border px-2.5 py-1.5 font-mono text-[9.5px] uppercase tracking-wider transition-colors ${
+                              className={`rounded-lg border px-3 py-2 font-mono text-[10.5px] uppercase tracking-wider transition-colors ${
                                 on
                                   ? "border-indigo-500/50 bg-indigo-500/10 font-semibold text-indigo-300"
                                   : "border-white/[0.08] text-gray-500 hover:text-gray-300"
@@ -900,17 +886,17 @@ export default function ReviewBench() {
                           );
                         })}
                       </div>
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-3">
                         <span className="hidden font-mono text-[11px] text-gray-600 sm:inline">
                           Ctrl+Enter to post
                         </span>
                         <button
-                          className="ds-btn-secondary"
+                          className="ds-btn-secondary text-[14px]"
                           onClick={() => setDrafts((p) => ({ ...p, [current.tc_key]: "" }))}
                         >
                           Clear
                         </button>
-                        <button className="ds-btn-primary" onClick={() => postComment(current)}>
+                        <button className="ds-btn-primary text-[14px]" onClick={() => postComment(current)}>
                           Post comment
                         </button>
                       </div>
@@ -930,74 +916,96 @@ export default function ReviewBench() {
         )}
       </div>
 
-      {/* name dialog ------------------------------------------------------ */}
-      {askName && (
+      {/* name dialog */}
+      {askName && mounted && createPortal(
         <div className="ds-modal-overlay" onClick={() => setAskName(false)}>
-          <div className="ds-modal max-w-[420px] p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-2 text-[16px] font-semibold text-gray-100">Who is reviewing?</h3>
-            <p className="mb-4 text-[13px] leading-relaxed text-gray-400">
+          <div className="ds-modal max-w-[430px] p-7" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-2.5 text-[17px] font-semibold text-gray-100">Who is reviewing?</h3>
+            <p className="mb-5 text-[14px] leading-relaxed text-gray-400">
               Your name is attached to everything you mark reviewed or comment on, so the
               rest of the team can see who signed off.
             </p>
             <input
               autoFocus
-              className="ds-input w-full"
+              className="ds-input w-full text-[15px]"
               placeholder="e.g. S. Girishankar"
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && saveName()}
             />
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-3">
               <button className="ds-btn-secondary" onClick={() => setAskName(false)}>Cancel</button>
               <button className="ds-btn-primary" onClick={saveName}>Save</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* toasts — top centre, gone in under two seconds ------------------- */}
-      <div className="pointer-events-none fixed left-1/2 top-4 z-[200] flex -translate-x-1/2 flex-col items-center gap-2">
-        {notes.map((n) => (
-          <div
-            key={n.id}
-            className={`toast ${n.kind === "success" ? "toast-success" : n.kind === "error" ? "toast-error" : "toast-info"} ${n.exiting ? "toast-exit" : ""}`}
-            style={{ animation: n.exiting ? undefined : "fadeIn var(--dur-fast) var(--ease)" }}
-          >
-            {n.text}
-          </div>
-        ))}
-      </div>
+      {/* Toasts go through a portal on purpose: the page content sits inside a
+          framer-motion transform, and a transformed ancestor makes position:fixed
+          resolve against *it* rather than the viewport — which parked the toast
+          inside the scrolling column, half hidden behind the header. */}
+      {mounted && createPortal(
+        <div className="pointer-events-none fixed left-1/2 top-6 z-[9999] flex -translate-x-1/2 flex-col items-center gap-2">
+          {notes.map((n) => (
+            <div
+              key={n.id}
+              className={`pointer-events-auto flex items-center gap-2.5 rounded-xl border px-5 py-3 text-[14px] font-medium shadow-2xl backdrop-blur ${
+                n.kind === "success"
+                  ? "border-emerald-500/25 bg-[#16261d]/95 text-emerald-300"
+                  : n.kind === "error"
+                  ? "border-rose-500/25 bg-[#2a1a18]/95 text-rose-300"
+                  : "border-indigo-500/25 bg-[#1c2033]/95 text-indigo-200"
+              }`}
+              style={{
+                animation: n.exiting
+                  ? "toastUp 260ms var(--ease-soft) forwards"
+                  : "toastDown 220ms var(--ease)",
+              }}
+            >
+              {n.text}
+            </div>
+          ))}
+          <style>{`
+            @keyframes toastDown { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+            @keyframes toastUp   { to { opacity: 0; transform: translateY(-10px); } }
+          `}</style>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
 
-function Meta({
-  label, value, title, href, muted, onCopy,
+function Field({
+  label, value, title, href, mono, muted, onCopy,
 }: {
-  label: string; value: string; title?: string; href?: string; muted?: boolean; onCopy?: () => void;
+  label: string; value: string; title?: string; href?: string;
+  mono?: boolean; muted?: boolean; onCopy?: () => void;
 }) {
   return (
-    <div className="bg-[#1a1d28] p-3.5">
-      <div className="mb-1.5 font-mono text-[9px] uppercase tracking-widest text-gray-600">{label}</div>
-      <div className="flex items-center gap-2.5 font-mono text-[11.5px]">
+    <div className="min-w-0">
+      <dt className="mb-1.5 font-mono text-[10.5px] uppercase tracking-widest text-gray-600">{label}</dt>
+      <dd className={`flex items-center gap-3 ${mono ? "font-mono" : ""} text-[13px]`}>
         {href ? (
           <a href={href} target="_blank" rel="noopener noreferrer" className="truncate text-indigo-400 hover:underline">
             {value}
           </a>
         ) : (
-          <span className={`truncate ${muted ? "italic text-gray-600" : "text-gray-400"}`} title={title}>
+          <span className={`truncate ${muted ? "italic text-gray-600" : "text-gray-300"}`} title={title}>
             {value}
           </span>
         )}
         {onCopy && (
           <button
             onClick={onCopy}
-            className="shrink-0 rounded border border-white/[0.08] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
+            className="shrink-0 rounded-md border border-white/[0.08] px-2 py-0.5 text-[10px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
           >
             Copy
           </button>
         )}
-      </div>
+      </dd>
     </div>
   );
 }
