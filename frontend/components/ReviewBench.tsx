@@ -475,7 +475,7 @@ export default function ReviewBench() {
       {/* ── queue + testcase ────────────────────────────────────────────── */}
       <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[356px_minmax(0,1fr)]">
         {/* queue ------------------------------------------------------- */}
-        <div className="ds-card flex min-h-0 flex-col overflow-hidden">
+        <div className="ds-card flex min-h-0 max-h-[38vh] flex-col overflow-hidden lg:max-h-none">
           <div className="flex items-center gap-3 border-b border-white/[0.055] px-5 py-3.5">
             <select
               value={dtFilter ?? ""}
@@ -661,70 +661,34 @@ export default function ReviewBench() {
             </div>
 
             <div ref={detailRef} className="main-content flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-2">
-              {/* context — ticket and testcase in one card, not two */}
+              {/* what it does — short orientation, then straight to the code */}
               <section className="ds-card">
                 <div className="p-7">
-                  <h2 className="max-w-[62ch] text-[20px] font-semibold leading-snug tracking-tight text-gray-100">
-                    {current.dt_summary}
-                  </h2>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {[
-                      ["Component", current.component],
-                      ["Fix version", current.fix_version],
-                      ["Priority", current.priority],
-                      ["Jira", current.jira_status],
-                    ].filter(([, v]) => v).map(([k, v]) => (
-                      <span
-                        key={k}
-                        className="rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 font-mono text-[12px] text-gray-400"
-                      >
-                        <span className="mr-2 uppercase tracking-wider text-gray-600">{k}</span>{v}
-                      </span>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={() => setOpenWhy((p) => ({ ...p, [current.dt]: !p[current.dt] }))}
-                    className="mt-5 flex items-center gap-2.5 text-[13.5px] text-gray-500 transition-colors hover:text-indigo-300"
-                    aria-expanded={!!openWhy[current.dt]}
-                  >
-                    <IconChevron open={!!openWhy[current.dt]} />
-                    {openWhy[current.dt] ? "Hide why this ticket exists" : "Why this ticket exists"}
-                  </button>
-                  {openWhy[current.dt] && (
-                    <p className="mt-4 max-w-[68ch] border-t border-white/[0.06] pt-4 text-[15px] leading-[1.75] text-gray-400">
-                      {current.dt_description}
-                    </p>
-                  )}
-
-                  <div className="mt-7 border-t border-white/[0.06] pt-6">
                     <div className="mb-3 font-mono text-[11px] uppercase tracking-widest text-gray-600">
-                      What this testcase does
-                    </div>
-                    <p className="max-w-[72ch] text-[15.5px] leading-[1.75] text-gray-300">
-                      {current.tc_summary}
-                    </p>
-
-                    <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2">
-                      <Field label="File" mono value={current.tc_file} title={current.tc_path}
-                             onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
-                      <Field label="Test report" mono muted={!current.report_url}
-                             value={current.report_url ?? "not linked yet"}
-                             href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
-                      <Field label="Pushed" mono value={fmtDate(current.pushed_at)} />
-                      {current.review_status === "reviewed" && (
-                        <Field label="Signed off" mono
-                               value={`${current.reviewed_by ?? "someone"} · ${fmtDate(current.reviewed_at)}`} />
-                      )}
-                      {current.flag && (
-                        <div className="sm:col-span-2">
-                          <dt className="mb-1.5 font-mono text-[10.5px] uppercase tracking-widest text-gray-600">Flag</dt>
-                          <dd className="max-w-[70ch] text-[14px] leading-relaxed text-rose-300/90">{current.flag}</dd>
-                        </div>
-                      )}
-                    </dl>
+                    What this testcase does
                   </div>
+                  <p className="max-w-[72ch] text-[15.5px] leading-[1.75] text-gray-300">
+                    {current.tc_summary}
+                  </p>
+
+                  <dl className="mt-6 grid gap-x-8 gap-y-4 sm:grid-cols-2">
+                    <Field label="File" mono value={current.tc_file} title={current.tc_path}
+                           onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
+                    <Field label="Test report" mono muted={!current.report_url}
+                           value={current.report_url ?? "not linked yet"}
+                           href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
+                    <Field label="Pushed" mono value={fmtDate(current.pushed_at)} />
+                    {current.review_status === "reviewed" && (
+                      <Field label="Signed off" mono
+                             value={`${current.reviewed_by ?? "someone"} · ${fmtDate(current.reviewed_at)}`} />
+                    )}
+                    {current.flag && (
+                      <div className="sm:col-span-2">
+                        <dt className="mb-1.5 font-mono text-[10.5px] uppercase tracking-widest text-gray-600">Flag</dt>
+                        <dd className="max-w-[70ch] text-[14px] leading-relaxed text-rose-300/90">{current.flag}</dd>
+                      </div>
+                    )}
+                  </dl>
                 </div>
               </section>
 
@@ -902,6 +866,46 @@ export default function ReviewBench() {
                       </div>
                     </div>
                   </div>
+                </div>
+              </section>
+
+              {/* ticket reference — background, not the job; last on purpose */}
+              <section className="ds-card">
+                <div className="p-7">
+                  <h2 className="max-w-[62ch] text-[20px] font-semibold leading-snug tracking-tight text-gray-100">
+                    {current.dt_summary}
+                  </h2>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {[
+                      ["Component", current.component],
+                      ["Fix version", current.fix_version],
+                      ["Priority", current.priority],
+                      ["Jira", current.jira_status],
+                    ].filter(([, v]) => v).map(([k, v]) => (
+                      <span
+                        key={k}
+                        className="rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-1.5 font-mono text-[12px] text-gray-400"
+                      >
+                        <span className="mr-2 uppercase tracking-wider text-gray-600">{k}</span>{v}
+                      </span>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => setOpenWhy((p) => ({ ...p, [current.dt]: !p[current.dt] }))}
+                    className="mt-5 flex items-center gap-2.5 text-[13.5px] text-gray-500 transition-colors hover:text-indigo-300"
+                    aria-expanded={!!openWhy[current.dt]}
+                  >
+                    <IconChevron open={!!openWhy[current.dt]} />
+                    {openWhy[current.dt] ? "Hide why this ticket exists" : "Why this ticket exists"}
+                  </button>
+                  {openWhy[current.dt] && (
+                    <p className="mt-4 max-w-[68ch] border-t border-white/[0.06] pt-4 text-[15px] leading-[1.75] text-gray-400">
+                      {current.dt_description}
+                    </p>
+                  )}
+
                 </div>
               </section>
             </div>
