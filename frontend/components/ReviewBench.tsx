@@ -742,7 +742,7 @@ export default function ReviewBench() {
                   }
                   const pass = last.status === "Pass";
                   return (
-                    <section className="ds-card overflow-hidden">
+                    <section id="latest-run" className="ds-card overflow-hidden">
                       <div className="flex flex-wrap items-center gap-4 border-b border-white/[0.055] px-6 py-4">
                         <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">
                           Latest run
@@ -1061,9 +1061,39 @@ export default function ReviewBench() {
                     <dl className="mt-5 grid gap-y-4">
                       <Field label="File" mono value={current.tc_file} title={current.tc_path}
                              onCopy={() => { navigator.clipboard?.writeText(current.tc_path); note("info", "Path copied"); }} />
-                      <Field label="Test report" mono muted={!current.report_url}
-                             value={current.report_url ?? "not linked yet"}
-                             href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
+                      {(() => {
+                        // A recorded run IS the report, so the rail should say so rather
+                        // than reporting "not linked" beside a completed result.
+                        const last = runs.filter((r) => r.testcase_id === current.id)[0];
+                        if (last) {
+                          return (
+                            <div className="min-w-0">
+                              <dt className="mb-1.5 font-mono text-[10.5px] uppercase tracking-widest text-gray-600">
+                                Test report
+                              </dt>
+                              <dd className="flex items-center gap-3 font-mono text-[13px]">
+                                <span className={last.status === "Pass" ? "text-emerald-400" : "text-rose-400"}>
+                                  {last.status} · {last.steps_passed}/{last.steps_total}
+                                </span>
+                                <button
+                                  className="shrink-0 rounded-md border border-white/[0.08] px-2 py-0.5 text-[10px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
+                                  onClick={() => {
+                                    setOpenSteps(true);
+                                    document.getElementById("latest-run")?.scrollIntoView({ block: "start" });
+                                  }}
+                                >
+                                  View
+                                </button>
+                              </dd>
+                            </div>
+                          );
+                        }
+                        return (
+                          <Field label="Test report" mono muted={!current.report_url}
+                                 value={current.report_url ?? "not run yet"}
+                                 href={current.report_url && /^https?:\/\//.test(current.report_url) ? current.report_url : undefined} />
+                        );
+                      })()}
                       <Field label="Pushed" mono value={fmtDate(current.pushed_at)} />
                       {current.review_status === "reviewed" && (
                         <Field label="Signed off" mono
