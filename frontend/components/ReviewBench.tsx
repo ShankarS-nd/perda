@@ -773,13 +773,24 @@ export default function ReviewBench() {
                             {mine.length} runs recorded
                           </span>
                         )}
-                        <button
-                          className="ml-auto flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
-                          onClick={() => setOpenSteps((o) => !o)}
-                        >
-                          <IconChevron open={openSteps} />
-                          {openSteps ? "Hide steps" : `Show all ${last.steps_total} steps`}
-                        </button>
+                        <span className="ml-auto flex items-center gap-4">
+                          <button
+                            className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
+                            onClick={() => setOpenSteps((o) => !o)}
+                          >
+                            <IconChevron open={openSteps} />
+                            {openSteps ? "Hide steps" : `Show all ${last.steps_total} steps`}
+                          </button>
+                          <a
+                            href={`${API_BASE}/review/runs/${last.id}/report`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 rounded-md border border-white/[0.08] px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-wider text-gray-400 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
+                          >
+                            Open full report
+                            <IconExternal />
+                          </a>
+                        </span>
                       </div>
                       {openSteps && (
                         <div className="scrollbar-thin max-h-[44vh] overflow-auto border-t border-white/[0.055] bg-[#0d0f16]">
@@ -1075,15 +1086,14 @@ export default function ReviewBench() {
                                 <span className={last.status === "Pass" ? "text-emerald-400" : "text-rose-400"}>
                                   {last.status} · {last.steps_passed}/{last.steps_total}
                                 </span>
-                                <button
+                                <a
+                                  href={`${API_BASE}/review/runs/${last.id}/report`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   className="shrink-0 rounded-md border border-white/[0.08] px-2 py-0.5 text-[10px] uppercase tracking-wider text-gray-500 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
-                                  onClick={() => {
-                                    setOpenSteps(true);
-                                    document.getElementById("latest-run")?.scrollIntoView({ block: "start" });
-                                  }}
                                 >
-                                  View
-                                </button>
+                                  Report
+                                </a>
                               </dd>
                             </div>
                           );

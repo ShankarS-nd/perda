@@ -106,7 +106,7 @@ def _is_jenkins_auth_error(text: str) -> bool:
 
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from script_runner import (
@@ -2369,3 +2369,118 @@ async def review_add_run(tc_key: str, payload: ReviewRunRequest):
     if run is None:
         raise HTTPException(status_code=404, detail="Testcase not found")
     return run
+
+
+# ---------------------------------------------------------------------------
+# Rendered run report
+#
+# The framework serves its own report from a Flask process that computes every
+# figure client-side over gRPC — captured as static HTML it renders all zeros,
+# so archiving that page would preserve a misleading document. This renders the
+# stored run instead: same facts, self-contained, and correct offline.
+# ---------------------------------------------------------------------------
+
+def _esc(v: Any) -> str:
+    return (str("" if v is None else v)
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
+    steps = run.get("steps") or []
+    rows = []
+    for step in steps:
+        for label, result in step.items():
+            heading = label.strip().startswith("--") and label.strip().endswith("--")
+            name = label.strip("-").strip() if heading else label
+            ok = result == "Pass"
+            if heading:
+                rows.append(
+                    f'<tr class="sec"><td colspan="2">{_esc(name)}</td></tr>'
+                )
+            else:
+                rows.append(
+                    f'<tr><td class="step">{_esc(name)}</td>'
+                    f'<td class="res {"ok" if ok else "bad"}">{_esc(result)}</td></tr>'
+                )
+
+    verdict = run.get("status", "unknown")
+    ok = verdict == "Pass"
+    total = run.get("steps_total", len(steps))
+    passed = run.get("steps_passed", 0)
+    failed = run.get("steps_failed", 0)
+
+    def stat(label: str, value: Any, cls: str = "") -> str:
+        return (f'<div class="stat"><div class="k">{_esc(label)}</div>'
+                f'<div class="v {cls}">{_esc(value)}</div></div>')
+
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_esc(tc.get('tc_id'))} — test report</title>
+<style>
+ :root{{--bg:#0f1117;--card:#1a1d28;--line:rgba(255,255,255,.08);--ink:#e5e7eb;
+   --dim:#9ca3af;--faint:#6b7280;--ok:#4ade80;--bad:#f87171;--accent:#818cf8}}
+ *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--ink);
+   font:15px/1.6 "IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;padding:40px 28px}}
+ .wrap{{max-width:1000px;margin:0 auto}}
+ h1{{font-size:24px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}}
+ h1 .id{{font-family:"IBM Plex Mono",ui-monospace,monospace}}
+ .sub{{color:var(--dim);font-size:14px;margin-bottom:24px}}
+ .sub a{{color:var(--accent);text-decoration:none}} .sub a:hover{{text-decoration:underline}}
+ .verdict{{display:inline-block;padding:4px 14px;border-radius:999px;font-weight:600;
+   font-size:13px;margin-left:10px;vertical-align:middle}}
+ .verdict.ok{{background:rgba(34,197,94,.12);color:var(--ok);border:1px solid rgba(34,197,94,.25)}}
+ .verdict.bad{{background:rgba(239,68,68,.12);color:var(--bad);border:1px solid rgba(239,68,68,.25)}}
+ .stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
+   background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:28px}}
+ .stat{{background:var(--card);padding:14px 16px}}
+ .stat .k{{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;
+   text-transform:uppercase;color:var(--faint);margin-bottom:6px}}
+ .stat .v{{font-family:"IBM Plex Mono",monospace;font-size:15px;color:var(--ink)}}
+ .stat .v.ok{{color:var(--ok)}} .stat .v.bad{{color:var(--bad)}}
+ h2{{font-size:12px;font-family:"IBM Plex Mono",monospace;letter-spacing:.14em;
+   text-transform:uppercase;color:var(--faint);margin:0 0 12px}}
+ table{{width:100%;border-collapse:collapse;background:var(--card);
+   border:1px solid var(--line);border-radius:12px;overflow:hidden}}
+ td{{padding:9px 16px;border-top:1px solid rgba(255,255,255,.04);vertical-align:top}}
+ tr:first-child td{{border-top:0}}
+ .sec td{{background:rgba(255,255,255,.035);font-weight:600;
+   font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.06em;color:var(--dim)}}
+ .step{{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--dim);word-break:break-word}}
+ .res{{font-family:"IBM Plex Mono",monospace;font-size:12px;text-align:right;width:70px;white-space:nowrap}}
+ .res.ok{{color:var(--ok)}} .res.bad{{color:var(--bad)}}
+ footer{{margin-top:24px;color:var(--faint);font-size:12px;
+   font-family:"IBM Plex Mono",monospace}}
+ @media print{{body{{background:#fff;color:#111}}
+   .stat,table{{background:#fff}} .res.ok{{color:#137333}} .res.bad{{color:#b3261e}}}}
+</style></head><body><div class="wrap">
+<h1><span class="id">{_esc(tc.get('tc_id'))}</span>
+  <span class="verdict {'ok' if ok else 'bad'}">{_esc(verdict)}</span></h1>
+<div class="sub">{_esc(tc.get('tc_summary'))}<br>
+  <a href="{_esc(tc.get('dt_url'))}">{_esc(tc.get('dt'))}</a> — {_esc(tc.get('dt_summary'))}</div>
+<div class="stats">
+  {stat('Steps', f'{passed} / {total} passed', 'ok' if not failed else 'bad')}
+  {stat('Failed', failed, 'bad' if failed else '')}
+  {stat('Device', run.get('device_id'))}
+  {stat('Type', run.get('device_type') or '—')}
+  {stat('Build', run.get('build') or '—')}
+  {stat('Duration', run.get('duration') or '—')}
+  {stat('Started', run.get('started_at') or '—')}
+  {stat('Ended', run.get('ended_at') or '—')}
+</div>
+<h2>Steps</h2>
+<table>{''.join(rows) or '<tr><td colspan="2">No steps recorded.</td></tr>'}</table>
+<footer>Generated by perda from run #{run.get('id')} &middot; framework collection {_esc(run.get('collection') or '—')}</footer>
+</div></body></html>"""
+
+
+@app.get("/review/runs/{run_id}/report", response_class=HTMLResponse)
+async def review_run_report(run_id: int):
+    """A self-contained HTML report for one recorded run."""
+    runs = get_review_runs(None, 500)
+    run = next((r for r in runs if r["id"] == run_id), None)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    tc = next((t for t in get_review_testcases() if t["id"] == run["testcase_id"]), {})
+    return HTMLResponse(_render_run_report(tc, run))
