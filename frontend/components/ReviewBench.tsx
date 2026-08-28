@@ -79,13 +79,27 @@ const ESC: Record<string, string> = {
 };
 const esc = (v: string) => String(v ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 
-function highlight(src: string): string {
-  let out = "";
+function highlightLines(src: string): string[] {
+  // One HTML string per line, rather than one blob, is what lets the gutter stay
+  // aligned when a long line soft-wraps: each line becomes its own row. Spans are
+  // closed and reopened at newlines so a docstring spanning twenty lines doesn't
+  // leave an unbalanced tag in every row it crosses.
+  const lines: string[] = [];
+  let cur = "";
+  const flush = () => { lines.push(cur); cur = ""; };
+  const put = (text: string, cls?: string) => {
+    const parts = text.split("\n");
+    parts.forEach((part, i) => {
+      if (i > 0) flush();
+      if (part) cur += cls ? `<span class="${cls}">${esc(part)}</span>` : esc(part);
+    });
+  };
+
   let last = 0;
   let m: RegExpExecArray | null;
   PY_TOKENS.lastIndex = 0;
   while ((m = PY_TOKENS.exec(src)) !== null) {
-    out += esc(src.slice(last, m.index));
+    put(src.slice(last, m.index));
     const t = m[0];
     const h3 = t.slice(0, 3);
     const ch = t.charAt(0);
@@ -95,10 +109,12 @@ function highlight(src: string): string {
     else if (ch === '"' || ch === "'") cls = "text-emerald-400/90";
     else if (ch >= "0" && ch <= "9") cls = "text-rose-400/90";
     else cls = "text-indigo-300 font-semibold";
-    out += `<span class="${cls}">${esc(t)}</span>`;
+    put(t, cls);
     last = m.index + t.length;
   }
-  return out + esc(src.slice(last));
+  put(src.slice(last));
+  flush();
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +199,7 @@ export default function ReviewBench() {
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
   const [showResolved, setShowResolved] = useState<Record<string, boolean>>({});
   const [foldSrc, setFoldSrc] = useState<Record<string, boolean>>({});
+  const [wrap, setWrap] = useState(true);
   const [openWhy, setOpenWhy] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -485,7 +502,7 @@ export default function ReviewBench() {
       )}
 
       {/* ── queue + testcase ────────────────────────────────────────────── */}
-      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[356px_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[312px_minmax(0,1fr)]">
         {/* queue ------------------------------------------------------- */}
         <div className="ds-card flex min-h-0 max-h-[38vh] flex-col overflow-hidden lg:max-h-none">
           <div className="flex items-center gap-3 border-b border-white/[0.055] px-5 py-3.5">
@@ -676,7 +693,7 @@ export default function ReviewBench() {
                and the testcase blurb sit in a rail that stays put while the code
                scrolls — reference you glance at, not content you read through. */}
             <div ref={detailRef} className="main-content min-h-0 flex-1 overflow-y-auto pr-2">
-              <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_312px]">
                 <div className="flex min-w-0 flex-col gap-5">
                 {/* source */}
                 <section className="ds-card overflow-hidden">
@@ -698,6 +715,17 @@ export default function ReviewBench() {
                             Copy
                           </button>
                           <button
+                            className={`rounded-md border px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-wider transition-colors ${
+                              wrap
+                                ? "border-indigo-500/40 bg-indigo-500/10 text-indigo-300"
+                                : "border-white/[0.08] text-gray-500 hover:text-gray-300"
+                            }`}
+                            onClick={() => setWrap((w) => !w)}
+                            title="Soft-wrap long lines instead of scrolling sideways"
+                          >
+                            Wrap
+                          </button>
+                          <button
                             className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
                             onClick={() => setFoldSrc((p) => ({ ...p, [current.tc_key]: !p[current.tc_key] }))}
                           >
@@ -710,15 +738,21 @@ export default function ReviewBench() {
                   </div>
                   {!foldSrc[current.tc_key] &&
                     (current.source ? (
-                      <div className="scrollbar-thin max-h-[60vh] overflow-auto bg-[#0d0f16]">
-                        <div className="flex min-w-min items-start font-mono text-[13px] leading-[1.75]">
-                          <div className="sticky left-0 z-10 shrink-0 select-none whitespace-pre border-r border-white/[0.06] bg-[#0b0d13] px-4 py-5 text-right text-gray-700 tabular-nums">
-                            {current.source.split("\n").map((_, i) => i + 1).join("\n")}
-                          </div>
-                          <div
-                            className="whitespace-pre px-6 py-5 text-gray-300"
-                            dangerouslySetInnerHTML={{ __html: highlight(current.source) }}
-                          />
+                      <div className="scrollbar-thin max-h-[62vh] overflow-auto bg-[#0d0f16] py-4">
+                        <div className="font-mono text-[13px] leading-[1.8]">
+                          {highlightLines(current.source).map((html, i) => (
+                            <div key={i} className="flex hover:bg-white/[0.02]">
+                              <span className="sticky left-0 z-10 w-[3.75rem] shrink-0 select-none border-r border-white/[0.06] bg-[#0b0d13] pr-3 text-right text-gray-700 tabular-nums">
+                                {i + 1}
+                              </span>
+                              <span
+                                className={`min-w-0 flex-1 pl-5 pr-6 text-gray-300 ${
+                                  wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"
+                                }`}
+                                dangerouslySetInnerHTML={{ __html: html || "&nbsp;" }}
+                              />
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ) : (
