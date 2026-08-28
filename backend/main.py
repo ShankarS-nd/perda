@@ -2389,13 +2389,6 @@ def _esc(v: Any) -> str:
 _REPORT_ASSETS = Path(__file__).resolve().parent / "report_assets"
 
 
-def _framework_css() -> str:
-    try:
-        return (_REPORT_ASSETS / "framework_styles.css").read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
-
 def _framework_logo() -> str:
     try:
         return (_REPORT_ASSETS / "logo_b64.txt").read_text(encoding="utf-8").strip()
@@ -2403,160 +2396,227 @@ def _framework_logo() -> str:
         return ""
 
 
+_REPORT_CSS = """
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body,h1,h2,h3,p,dl,dd,dt,table{margin:0;padding:0}
+:root{
+  --ground:#F4F6F9; --surface:#FFFFFF; --raised:#FAFBFD;
+  --ink:#151A24; --ink-2:#4A5265; --ink-3:#78808F; --ink-4:#9AA1AE;
+  --line:#E4E7EE; --line-2:#D3D8E2;
+  --accent:#4F46E5; --accent-soft:#EEF0FE;
+  --ok:#12703A; --ok-bg:#E9F8EF; --ok-line:#B6E3C7;
+  --bad:#B02318; --bad-bg:#FDEDEA; --bad-line:#F3C2BA;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;padding:36px 24px 72px}
+.sheet{max-width:1060px;margin:0 auto}
+
+/* ---- masthead ---- */
+.mast{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:28px 32px;box-shadow:0 1px 2px rgba(21,26,36,.04),0 12px 32px -24px rgba(21,26,36,.3)}
+.mast-top{display:flex;align-items:center;gap:16px;padding-bottom:20px;
+  border-bottom:1px solid var(--line);margin-bottom:22px}
+.mast-top img{height:30px;width:auto}
+.mast-title{font-size:12px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-4)}
+.mast-when{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-4)}
+.tc-line{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+h1{font-family:var(--mono);font-size:27px;font-weight:600;letter-spacing:-.01em}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;border-radius:999px;
+  font-size:13px;font-weight:600;border:1px solid}
+.pill.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+.pill.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.ticket{margin-top:14px;font-size:15px;color:var(--ink-2);max-width:78ch}
+.ticket a{color:var(--accent);text-decoration:none;font-weight:600;font-family:var(--mono);font-size:14px}
+.ticket a:hover{text-decoration:underline}
+.ticket .sum{display:block;margin-top:4px;color:var(--ink-3);font-size:14px}
+
+/* ---- headline numbers ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+  gap:14px;margin:22px 0 30px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.kpi .k{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-4);margin-bottom:8px}
+.kpi .v{font-family:var(--mono);font-size:21px;font-weight:600;letter-spacing:-.02em;
+  color:var(--ink);font-variant-numeric:tabular-nums}
+.kpi .v.ok{color:var(--ok)} .kpi .v.bad{color:var(--bad)}
+.kpi .s{font-size:12.5px;color:var(--ink-3);margin-top:3px}
+.bar{height:5px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:11px}
+.bar i{display:block;height:100%;background:var(--ok);border-radius:999px}
+
+/* ---- sections ---- */
+section{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  overflow:hidden;margin-bottom:20px}
+section > h2{font-size:11.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);padding:14px 20px;background:var(--raised);border-bottom:1px solid var(--line)}
+dl.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0}
+dl.facts > div{padding:15px 20px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+dl.facts dt{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-4);margin-bottom:5px}
+dl.facts dd{font-family:var(--mono);font-size:13.5px;color:var(--ink-2);word-break:break-word}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+thead th{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-4);text-align:left;padding:11px 20px;background:var(--raised);
+  border-bottom:1px solid var(--line);white-space:nowrap}
+tbody td{padding:12px 20px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-2)}
+tbody tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.mono{font-family:var(--mono);font-size:13px;color:var(--ink)}
+.tag{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;
+  font-weight:600;border:1px solid}
+.tag.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+.tag.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
+
+/* ---- steps ---- */
+tr.group td{background:var(--raised);font-family:var(--mono);font-size:11.5px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding:10px 20px}
+tr.step td.txt{font-family:var(--mono);font-size:12.5px;line-height:1.65;color:var(--ink-2);
+  word-break:break-word;padding-left:34px;position:relative}
+tr.step td.txt::before{content:"";position:absolute;left:20px;top:19px;width:6px;height:6px;
+  border-radius:50%;background:var(--ok)}
+tr.step.f td.txt::before{background:var(--bad)}
+tr.step td.res{width:88px;text-align:right;white-space:nowrap}
+
+footer{margin-top:26px;text-align:center;font-family:var(--mono);font-size:11.5px;
+  color:var(--ink-4);line-height:1.8}
+
+@media print{
+  body{background:#fff;padding:0;font-size:11.5pt}
+  .mast,section,.kpi{box-shadow:none;border-color:#CDD2DC;break-inside:avoid}
+  section{break-inside:auto} tr{break-inside:avoid}
+  thead{display:table-header-group}
+}
+"""
+
+
 def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
     """
-    Reproduce the framework's own DAST Report for a stored run.
+    A standalone report for one recorded run.
 
-    Same stylesheet, same table structure and class names as
-    Interface/templates/index.html. The difference is that every figure is
-    filled in server-side: the framework's page leaves its tbodies empty and
-    lets scr.js populate them over gRPC, which is why a captured copy shows
-    all zeros. Rendering here means the report is correct with no live
-    framework, no Mongo and no JavaScript.
+    Keeps the framework report's information — overall result, service-level
+    summary, the testcase row and every step — but renders it as a document
+    that reads and prints well. Every figure is written server-side, so unlike
+    the framework's own page (which fills its tables from gRPC via scr.js, and
+    therefore shows all zeros when saved) this is correct with no framework
+    running, no database, and no JavaScript.
     """
     steps = run.get("steps") or []
     verdict = run.get("status", "unknown")
-    passed_tc = 1 if verdict == "Pass" else 0
-    failed_tc = 1 if verdict == "Fail" else 0
-    ne_tc = 1 if verdict not in ("Pass", "Fail") else 0
-    total_tc = 1
-    pass_pct = f"{(passed_tc / total_tc) * 100:.0f}%" if total_tc else "0%"
-
+    ok = verdict == "Pass"
+    total = run.get("steps_total") or len(steps)
+    passed = run.get("steps_passed") or 0
+    failed = run.get("steps_failed") or 0
+    pct = round((passed / total) * 100) if total else 0
     service = (tc.get("component") or "—").split("(")[0].strip()
-    device_id = run.get("device_id") or "—"
 
-    # --- overall stats -----------------------------------------------------
-    overall_row = (
-        "<tr>"
-        f"<td>{_esc(run.get('device_type') or '—')}</td>"
-        f"<td>{_esc(device_id)}</td>"
-        f"<td>{_esc(run.get('build') or '—')}</td>"
-        f"<td>{_esc(run.get('build') or '—')}</td>"
-        f"<td>{_esc(run.get('device_ip') or '—')}</td>"
-        f"<td>{_esc(run.get('started_at') or '—')}</td>"
-        f"<td>{total_tc}</td>"
-        f'<td id="pass">{passed_tc}</td>'
-        f'<td id="fail">{failed_tc}</td>'
-        f"<td>{ne_tc}</td><td>0</td></tr>"
-    )
+    def fact(label: str, value: Any) -> str:
+        return f"<div><dt>{_esc(label)}</dt><dd>{_esc(value or '—')}</dd></div>"
 
-    service_row = (
-        "<tr>"
-        f"<td>{_esc(device_id)}</td>"
-        f"<td>{_esc(service)}</td>"
-        f"<td>{total_tc}</td>"
-        f'<td id="pass">{passed_tc}</td>'
-        f'<td id="fail">{failed_tc}</td>'
-        f"<td>{ne_tc}</td><td>0</td>"
-        f"<td>{pass_pct}</td>"
-        f"<td>{_esc(run.get('duration') or '—')}</td></tr>"
-    )
+    def kpi(label: str, value: str, cls: str = "", sub: str = "", extra: str = "") -> str:
+        return (f'<div class="kpi"><div class="k">{_esc(label)}</div>'
+                f'<div class="v {cls}">{value}</div>'
+                + (f'<div class="s">{_esc(sub)}</div>' if sub else "") + extra + "</div>")
 
-    status_cls = "pass" if verdict == "Pass" else "fail"
-    tc_row = (
-        "<tr>"
-        f"<td>{_esc(tc.get('tc_id'))}</td>"
-        f'<td style="text-align:left">{_esc(tc.get("tc_summary"))}</td>'
-        f'<td id="{status_cls}"><b>{_esc(verdict)}</b></td></tr>'
-    )
-
-    # --- per-step detail, in the framework's results-table styling ---------
     step_rows = []
     for step in steps:
         for label, result in step.items():
             bare = label.strip()
             if bare.startswith("--") and bare.endswith("--"):
                 step_rows.append(
-                    f'<tr><td colspan="2" class="bold-text" '
-                    f'style="background:#eef1f6">{_esc(bare.strip("-").strip())}</td></tr>'
-                )
+                    f'<tr class="group"><td colspan="2">{_esc(bare.strip("-").strip())}</td></tr>')
             else:
-                sid = "pass" if result == "Pass" else "fail"
+                good = result == "Pass"
                 step_rows.append(
-                    f'<tr><td style="text-align:left">{_esc(label)}</td>'
-                    f'<td id="{sid}"><b>{_esc(result)}</b></td></tr>'
-                )
+                    f'<tr class="step{"" if good else " f"}">'
+                    f'<td class="txt">{_esc(label)}</td>'
+                    f'<td class="res"><span class="tag {"ok" if good else "bad"}">{_esc(result)}</span></td></tr>')
 
     logo = _framework_logo()
-    logo_img = (f'<img src="data:image/png;base64,{logo}" alt="Netradyne" '
-                f'style="height:42px;vertical-align:middle;margin-right:14px">') if logo else ""
+    logo_img = f'<img src="data:image/png;base64,{logo}" alt="Netradyne">' if logo else ""
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DAST Report — {_esc(tc.get('tc_id'))}</title>
-<style>
-{_framework_css()}
-/* Additions for the standalone copy: the framework page relies on Bootstrap
-   from a CDN and on scr.js for layout that only exists once data loads. */
-body {{ padding: 0 24px 60px; }}
-h1 {{ display: flex; align-items: center; justify-content: center; }}
-.meta-line {{ text-align:center; color:#555; font-size:14px; margin:-8px 0 26px; }}
-.meta-line a {{ color:#1a4ed8; text-decoration:none; }}
-.meta-line a:hover {{ text-decoration:underline; }}
-table {{ margin-bottom: 34px; }}
-.step-table td:first-child {{ font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12.5px; }}
-.step-table td:last-child {{ width: 90px; text-align: center; }}
-@media print {{ body {{ padding: 0; }} }}
-</style></head><body>
+<title>{_esc(tc.get('tc_id'))} — Test Report</title>
+<style>{_REPORT_CSS}</style></head><body><div class="sheet">
 
-<h1>{logo_img}DAST Report</h1>
-<div class="meta-line">
-  {_esc(tc.get('tc_id'))} &middot;
-  <a href="{_esc(tc.get('dt_url'))}">{_esc(tc.get('dt'))}</a> &middot;
-  {_esc(tc.get('dt_summary'))}
+<div class="mast">
+  <div class="mast-top">
+    {logo_img}
+    <span class="mast-title">Regression Test Report</span>
+    <span class="mast-when">{_esc(run.get('started_at') or '')}</span>
+  </div>
+  <div class="tc-line">
+    <h1>{_esc(tc.get('tc_id'))}</h1>
+    <span class="pill {'ok' if ok else 'bad'}"><span class="dot"></span>{_esc(verdict)}</span>
+  </div>
+  <div class="ticket">
+    <a href="{_esc(tc.get('dt_url'))}">{_esc(tc.get('dt'))}</a> — {_esc(tc.get('dt_summary'))}
+    <span class="sum">{_esc(tc.get('tc_summary'))}</span>
+  </div>
 </div>
 
-<h3 class="Test_Table_start_heading" id="overall-summary">Overall Summary</h3>
-<table class="Test_Info" id="overallStatsTable">
-  <thead><tr>
-    <th>SKU</th><th>Device ID</th><th>OS Version</th><th>OTA Version</th>
-    <th>IP Address</th><th>Start Timestamp</th><th>Total Test Cases</th>
-    <th>Pass</th><th>Fail</th><th>Not Executed</th><th>Not Applicable</th>
-  </tr></thead>
-  <tbody id="overallStatsTableBody">{overall_row}</tbody>
-  <tfoot id="totalRow"><tr>
-    <th colspan="6">Total</th>
-    <th id="totalTestCases">{total_tc}</th>
-    <th id="totalPass">{passed_tc}</th>
-    <th id="totalFail">{failed_tc}</th>
-    <th id="totalNotExecuted">{ne_tc}</th>
-    <th id="totalNotApplicable">0</th>
-  </tr></tfoot>
-</table>
-
-<h2 class="Test_Table_heading">Service Level Summary</h2>
-<table class="service_level_info" id="serviceLevelTable">
-  <thead><tr>
-    <th>Device ID</th><th>Service Name</th><th>Total TC</th><th>Pass</th>
-    <th>Fail</th><th>Not Executed</th><th>Not Applicable</th><th>Pass%</th>
-    <th>Time Consumed</th>
-  </tr></thead>
-  <tbody id="serviceLevelTableBody">{service_row}</tbody>
-</table>
-
-<h2 class="Test_Table_heading">Test Cases</h2>
-<table class="Test_Tables_results">
-  <thead><tr id="header-row">
-    <th style="font-size: larger;">Test Id</th>
-    <th style="font-size: larger; text-align: left;">Description</th>
-    <th style="font-size: larger;">{_esc(device_id)}</th>
-  </tr></thead>
-  <tbody id="OverallStatsTableWithDeviceID">{tc_row}</tbody>
-</table>
-
-<h2 class="Test_Table_heading">Test Steps &mdash; {_esc(tc.get('tc_id'))}</h2>
-<table class="Test_Tables_results step-table">
-  <thead><tr><th style="text-align:left">Step</th><th>Result</th></tr></thead>
-  <tbody>{''.join(step_rows) or '<tr><td colspan="2">No steps recorded.</td></tr>'}</tbody>
-</table>
-
-<div class="meta-line" style="margin-top:30px">
-  Run #{run.get('id')} &middot; duration {_esc(run.get('duration') or '—')} &middot;
-  {_esc(run.get('started_at'))} &rarr; {_esc(run.get('ended_at'))} &middot;
-  framework collection {_esc(run.get('collection') or '—')}
+<div class="kpis">
+  {kpi('Result', _esc(verdict), 'ok' if ok else 'bad',
+       'all steps passed' if ok and not failed else f'{failed} step(s) failed')}
+  {kpi('Steps passed', f'{passed}<span style="color:var(--ink-4)">/{total}</span>', '',
+       '', f'<div class="bar"><i style="width:{pct}%"></i></div>')}
+  {kpi('Duration', _esc(run.get('duration') or '—'), '', 'wall clock')}
+  {kpi('Device', _esc(run.get('device_id') or '—'), '',
+       f"{run.get('device_type') or 'unknown type'}")}
 </div>
-</body></html>"""
+
+<section>
+  <h2>Execution</h2>
+  <dl class="facts">
+    {fact('Device ID', run.get('device_id'))}
+    {fact('Device type', run.get('device_type'))}
+    {fact('IP address', run.get('device_ip'))}
+    {fact('Build', run.get('build'))}
+    {fact('Service', service)}
+    {fact('Started', run.get('started_at'))}
+    {fact('Ended', run.get('ended_at'))}
+    {fact('Framework collection', run.get('collection'))}
+  </dl>
+</section>
+
+<section>
+  <h2>Result</h2>
+  <table>
+    <thead><tr>
+      <th>Test ID</th><th>Service</th><th class="num">Total</th><th class="num">Pass</th>
+      <th class="num">Fail</th><th class="num">Pass %</th><th class="num">Time</th><th>Status</th>
+    </tr></thead>
+    <tbody><tr>
+      <td class="mono">{_esc(tc.get('tc_id'))}</td>
+      <td>{_esc(service)}</td>
+      <td class="num">1</td>
+      <td class="num">{1 if ok else 0}</td>
+      <td class="num">{0 if ok else 1}</td>
+      <td class="num">{100 if ok else 0}%</td>
+      <td class="num">{_esc(run.get('duration') or '—')}</td>
+      <td><span class="tag {'ok' if ok else 'bad'}">{_esc(verdict)}</span></td>
+    </tr></tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Steps &mdash; {passed} of {total} passed</h2>
+  <table><tbody>
+    {''.join(step_rows) or '<tr><td colspan="2">No steps recorded.</td></tr>'}
+  </tbody></table>
+</section>
+
+<footer>
+  Run #{run.get('id')} &middot; generated by perda from the recorded execution<br>
+  {_esc(tc.get('tc_path') or '')}
+</footer>
+</div></body></html>"""
 
 
 @app.get("/review/runs/{run_id}/report", response_class=HTMLResponse)
