@@ -27,6 +27,7 @@ Device Logs endpoints:
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 import logging
@@ -2396,100 +2397,139 @@ def _framework_logo() -> str:
         return ""
 
 
+def _group_steps(steps: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """
+    Fold the framework's flat log into the actual test steps.
+
+    Test_Steps interleaves step markers ("----S1----", "----PreCondition_1----")
+    with every command and message logged underneath them. A run of 44 entries is
+    12 real steps; counting the raw entries overstates the work by a factor of
+    four, so the markers are what gets counted and the rest becomes detail.
+    """
+    groups: list[dict[str, Any]] = []
+    for entry in steps:
+        for label, result in entry.items():
+            bare = label.strip()
+            if bare.startswith("--") and bare.endswith("--"):
+                name = bare.strip("-").strip()
+                # the framework writes STEP_1 as "S1"
+                m = re.fullmatch(r"S(\d+)", name)
+                if m:
+                    name = f"STEP_{m.group(1)}"
+                groups.append({"name": name, "result": result, "lines": []})
+            else:
+                if not groups:
+                    groups.append({"name": "Setup", "result": "Pass", "lines": []})
+                groups[-1]["lines"].append((label, result))
+                if result != "Pass":
+                    groups[-1]["result"] = result
+    return groups
+
+
 _REPORT_CSS = """
 *,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body,h1,h2,h3,p,dl,dd,dt,table{margin:0;padding:0}
+body,h1,h2,h3,p,dl,dd,dt,table,summary{margin:0;padding:0}
 :root{
-  --ground:#F4F6F9; --surface:#FFFFFF; --raised:#FAFBFD;
-  --ink:#151A24; --ink-2:#4A5265; --ink-3:#78808F; --ink-4:#9AA1AE;
-  --line:#E4E7EE; --line-2:#D3D8E2;
-  --accent:#4F46E5; --accent-soft:#EEF0FE;
-  --ok:#12703A; --ok-bg:#E9F8EF; --ok-line:#B6E3C7;
-  --bad:#B02318; --bad-bg:#FDEDEA; --bad-line:#F3C2BA;
+  --ground:#0E1117; --surface:#161B24; --raised:#1B212C; --sunken:#11151D;
+  --ink:#E7EAF1; --ink-2:#A6AEBE; --ink-3:#7B8394; --ink-4:#616978;
+  --line:#242A36; --line-2:#2E3541;
+  --accent:#8E9EDC; --accent-soft:#1F2740;
+  --ok:#6FC191; --ok-bg:#14251C; --ok-line:#2A4636;
+  --bad:#E08C82; --bad-bg:#2A1917; --bad-line:#472925;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
 }
-body{background:var(--ground);color:var(--ink);font-family:var(--sans);
-  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;padding:36px 24px 72px}
-.sheet{max-width:1060px;margin:0 auto}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:15px;
+  line-height:1.6;-webkit-font-smoothing:antialiased;padding:36px 24px 72px}
+.sheet{max-width:1020px;margin:0 auto}
 
-/* ---- masthead ---- */
-.mast{background:var(--surface);border:1px solid var(--line);border-radius:14px;
-  padding:28px 32px;box-shadow:0 1px 2px rgba(21,26,36,.04),0 12px 32px -24px rgba(21,26,36,.3)}
-.mast-top{display:flex;align-items:center;gap:16px;padding-bottom:20px;
-  border-bottom:1px solid var(--line);margin-bottom:22px}
-.mast-top img{height:30px;width:auto}
-.mast-title{font-size:12px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--ink-4)}
+.mast{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px 30px}
+.mast-top{display:flex;align-items:center;gap:16px;padding-bottom:18px;
+  border-bottom:1px solid var(--line);margin-bottom:20px}
+.mast-top img{height:26px;width:auto;opacity:.9}
+.mast-title{font-size:11.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4)}
 .mast-when{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-4)}
 .tc-line{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-h1{font-family:var(--mono);font-size:27px;font-weight:600;letter-spacing:-.01em}
+h1{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.01em;color:var(--ink)}
 .pill{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;border-radius:999px;
   font-size:13px;font-weight:600;border:1px solid}
 .pill.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
 .pill.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
 .pill .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
-.ticket{margin-top:14px;font-size:15px;color:var(--ink-2);max-width:78ch}
-.ticket a{color:var(--accent);text-decoration:none;font-weight:600;font-family:var(--mono);font-size:14px}
+.ticket{margin-top:13px;font-size:14.5px;color:var(--ink-2);max-width:78ch}
+.ticket a{color:var(--accent);text-decoration:none;font-weight:600;font-family:var(--mono);font-size:13.5px}
 .ticket a:hover{text-decoration:underline}
-.ticket .sum{display:block;margin-top:4px;color:var(--ink-3);font-size:14px}
+.ticket .sum{display:block;margin-top:5px;color:var(--ink-3);font-size:13.5px}
 
-/* ---- headline numbers ---- */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
-  gap:14px;margin:22px 0 30px}
-.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
-.kpi .k{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:13px;margin:20px 0 26px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px 17px}
+.kpi .k{font-size:10.5px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
   color:var(--ink-4);margin-bottom:8px}
-.kpi .v{font-family:var(--mono);font-size:21px;font-weight:600;letter-spacing:-.02em;
+.kpi .v{font-family:var(--mono);font-size:20px;font-weight:600;letter-spacing:-.02em;
   color:var(--ink);font-variant-numeric:tabular-nums}
 .kpi .v.ok{color:var(--ok)} .kpi .v.bad{color:var(--bad)}
-.kpi .s{font-size:12.5px;color:var(--ink-3);margin-top:3px}
-.bar{height:5px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:11px}
+.kpi .s{font-size:12px;color:var(--ink-3);margin-top:3px}
+.bar{height:5px;border-radius:999px;background:var(--line-2);overflow:hidden;margin-top:10px}
 .bar i{display:block;height:100%;background:var(--ok);border-radius:999px}
 
-/* ---- sections ---- */
 section{background:var(--surface);border:1px solid var(--line);border-radius:12px;
-  overflow:hidden;margin-bottom:20px}
-section > h2{font-size:11.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
-  color:var(--ink-3);padding:14px 20px;background:var(--raised);border-bottom:1px solid var(--line)}
-dl.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0}
-dl.facts > div{padding:15px 20px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
-dl.facts dt{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  overflow:hidden;margin-bottom:18px}
+section > h2{font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);padding:13px 20px;background:var(--raised);border-bottom:1px solid var(--line)}
+dl.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:0}
+dl.facts > div{padding:14px 20px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+dl.facts dt{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
   color:var(--ink-4);margin-bottom:5px}
-dl.facts dd{font-family:var(--mono);font-size:13.5px;color:var(--ink-2);word-break:break-word}
+dl.facts dd{font-family:var(--mono);font-size:13px;color:var(--ink-2);word-break:break-word}
 
 table{width:100%;border-collapse:collapse;font-size:14px}
-thead th{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+thead th{font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
   color:var(--ink-4);text-align:left;padding:11px 20px;background:var(--raised);
   border-bottom:1px solid var(--line);white-space:nowrap}
-tbody td{padding:12px 20px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-2)}
+tbody td{padding:12px 20px;border-bottom:1px solid var(--line);color:var(--ink-2)}
 tbody tr:last-child td{border-bottom:0}
 td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
 td.mono{font-family:var(--mono);font-size:13px;color:var(--ink)}
-.tag{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;
-  font-weight:600;border:1px solid}
+.tag{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11.5px;
+  font-weight:600;border:1px solid;white-space:nowrap}
 .tag.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
 .tag.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line)}
 
-/* ---- steps ---- */
-tr.group td{background:var(--raised);font-family:var(--mono);font-size:11.5px;font-weight:600;
-  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding:10px 20px}
-tr.step td.txt{font-family:var(--mono);font-size:12.5px;line-height:1.65;color:var(--ink-2);
-  word-break:break-word;padding-left:34px;position:relative}
-tr.step td.txt::before{content:"";position:absolute;left:20px;top:19px;width:6px;height:6px;
+/* ---- steps: one row per real step, details on demand ---- */
+details.step{border-bottom:1px solid var(--line)}
+details.step:last-child{border-bottom:0}
+details.step > summary{display:flex;align-items:center;gap:13px;padding:13px 20px;
+  cursor:pointer;list-style:none;transition:background .12s}
+details.step > summary::-webkit-details-marker{display:none}
+details.step > summary:hover{background:var(--raised)}
+.chev{flex:none;width:9px;height:9px;border-right:1.8px solid var(--ink-4);
+  border-bottom:1.8px solid var(--ink-4);transform:rotate(-45deg);transition:transform .18s;margin-left:2px}
+details.step[open] > .s-head .chev,details.step[open] > summary .chev{transform:rotate(45deg)}
+.s-name{font-family:var(--mono);font-size:13.5px;font-weight:600;color:var(--ink);min-width:130px}
+.s-count{font-family:var(--mono);font-size:11.5px;color:var(--ink-4)}
+.s-tag{margin-left:auto}
+.lines{background:var(--sunken);border-top:1px solid var(--line);padding:6px 0}
+.line{display:flex;align-items:flex-start;gap:12px;padding:7px 20px 7px 44px;position:relative}
+.line::before{content:"";position:absolute;left:26px;top:14px;width:5px;height:5px;
   border-radius:50%;background:var(--ok)}
-tr.step.f td.txt::before{background:var(--bad)}
-tr.step td.res{width:88px;text-align:right;white-space:nowrap}
+.line.f::before{background:var(--bad)}
+.line .t{flex:1;font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--ink-3);word-break:break-word}
+.line .r{font-family:var(--mono);font-size:11px;color:var(--ok);white-space:nowrap}
+.line.f .r{color:var(--bad)}
 
-footer{margin-top:26px;text-align:center;font-family:var(--mono);font-size:11.5px;
+footer{margin-top:24px;text-align:center;font-family:var(--mono);font-size:11.5px;
   color:var(--ink-4);line-height:1.8}
 
 @media print{
-  body{background:#fff;padding:0;font-size:11.5pt}
-  .mast,section,.kpi{box-shadow:none;border-color:#CDD2DC;break-inside:avoid}
-  section{break-inside:auto} tr{break-inside:avoid}
+  :root{--ground:#fff;--surface:#fff;--raised:#F4F6F9;--sunken:#FAFBFD;
+    --ink:#111827;--ink-2:#374151;--ink-3:#4B5563;--ink-4:#6B7280;
+    --line:#D8DCE4;--line-2:#C7CCD6;--ok:#12703A;--ok-bg:#E9F8EF;--ok-line:#B6E3C7;
+    --bad:#B02318;--bad-bg:#FDEDEA;--bad-line:#F3C2BA;--accent:#3730A3}
+  body{padding:0;font-size:11pt}
+  details.step > .lines,details.step .lines{display:block !important}
+  details.step{break-inside:avoid}
   thead{display:table-header-group}
+  .mast,section,.kpi{break-inside:avoid}
 }
 """
 
@@ -2498,20 +2538,20 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
     """
     A standalone report for one recorded run.
 
-    Keeps the framework report's information — overall result, service-level
-    summary, the testcase row and every step — but renders it as a document
-    that reads and prints well. Every figure is written server-side, so unlike
-    the framework's own page (which fills its tables from gRPC via scr.js, and
-    therefore shows all zeros when saved) this is correct with no framework
-    running, no database, and no JavaScript.
+    Counts real test steps rather than log entries, keeps each step collapsed
+    until asked, and fills every figure server-side — so unlike the framework's
+    own page (which populates its tables from gRPC via scr.js and therefore
+    shows zeros when saved) this stays correct with nothing running.
     """
-    steps = run.get("steps") or []
+    groups = _group_steps(run.get("steps") or [])
     verdict = run.get("status", "unknown")
     ok = verdict == "Pass"
-    total = run.get("steps_total") or len(steps)
-    passed = run.get("steps_passed") or 0
-    failed = run.get("steps_failed") or 0
-    pct = round((passed / total) * 100) if total else 0
+
+    step_total = len(groups)
+    step_passed = sum(1 for g in groups if g["result"] == "Pass")
+    step_failed = step_total - step_passed
+    pct = round((step_passed / step_total) * 100) if step_total else 0
+    checks = sum(len(g["lines"]) for g in groups)
     service = (tc.get("component") or "—").split("(")[0].strip()
 
     def fact(label: str, value: Any) -> str:
@@ -2522,19 +2562,22 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
                 f'<div class="v {cls}">{value}</div>'
                 + (f'<div class="s">{_esc(sub)}</div>' if sub else "") + extra + "</div>")
 
-    step_rows = []
-    for step in steps:
-        for label, result in step.items():
-            bare = label.strip()
-            if bare.startswith("--") and bare.endswith("--"):
-                step_rows.append(
-                    f'<tr class="group"><td colspan="2">{_esc(bare.strip("-").strip())}</td></tr>')
-            else:
-                good = result == "Pass"
-                step_rows.append(
-                    f'<tr class="step{"" if good else " f"}">'
-                    f'<td class="txt">{_esc(label)}</td>'
-                    f'<td class="res"><span class="tag {"ok" if good else "bad"}">{_esc(result)}</span></td></tr>')
+    blocks = []
+    for g in groups:
+        good = g["result"] == "Pass"
+        lines = "".join(
+            f'<div class="line{"" if r == "Pass" else " f"}">'
+            f'<span class="t">{_esc(l)}</span><span class="r">{_esc(r)}</span></div>'
+            for l, r in g["lines"]
+        ) or '<div class="line"><span class="t">No detail recorded for this step.</span></div>'
+        blocks.append(
+            f'<details class="step"{"" if good else " open"}>'
+            f'<summary><span class="chev"></span>'
+            f'<span class="s-name">{_esc(g["name"])}</span>'
+            f'<span class="s-count">{len(g["lines"])} check{"" if len(g["lines"]) == 1 else "s"}</span>'
+            f'<span class="s-tag"><span class="tag {"ok" if good else "bad"}">{_esc(g["result"])}</span></span>'
+            f'</summary><div class="lines">{lines}</div></details>'
+        )
 
     logo = _framework_logo()
     logo_img = f'<img src="data:image/png;base64,{logo}" alt="Netradyne">' if logo else ""
@@ -2563,12 +2606,11 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
 
 <div class="kpis">
   {kpi('Result', _esc(verdict), 'ok' if ok else 'bad',
-       'all steps passed' if ok and not failed else f'{failed} step(s) failed')}
-  {kpi('Steps passed', f'{passed}<span style="color:var(--ink-4)">/{total}</span>', '',
-       '', f'<div class="bar"><i style="width:{pct}%"></i></div>')}
+       'every step passed' if ok and not step_failed else f'{step_failed} step(s) failed')}
+  {kpi('Steps', f'{step_passed}<span style="color:var(--ink-4)">/{step_total}</span>', '',
+       f'{checks} checks underneath', f'<div class="bar"><i style="width:{pct}%"></i></div>')}
   {kpi('Duration', _esc(run.get('duration') or '—'), '', 'wall clock')}
-  {kpi('Device', _esc(run.get('device_id') or '—'), '',
-       f"{run.get('device_type') or 'unknown type'}")}
+  {kpi('Device', _esc(run.get('device_id') or '—'), '', run.get('device_type') or 'unknown type')}
 </div>
 
 <section>
@@ -2589,16 +2631,16 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
   <h2>Result</h2>
   <table>
     <thead><tr>
-      <th>Test ID</th><th>Service</th><th class="num">Total</th><th class="num">Pass</th>
+      <th>Test ID</th><th>Service</th><th class="num">Steps</th><th class="num">Pass</th>
       <th class="num">Fail</th><th class="num">Pass %</th><th class="num">Time</th><th>Status</th>
     </tr></thead>
     <tbody><tr>
       <td class="mono">{_esc(tc.get('tc_id'))}</td>
       <td>{_esc(service)}</td>
-      <td class="num">1</td>
-      <td class="num">{1 if ok else 0}</td>
-      <td class="num">{0 if ok else 1}</td>
-      <td class="num">{100 if ok else 0}%</td>
+      <td class="num">{step_total}</td>
+      <td class="num">{step_passed}</td>
+      <td class="num">{step_failed}</td>
+      <td class="num">{pct}%</td>
       <td class="num">{_esc(run.get('duration') or '—')}</td>
       <td><span class="tag {'ok' if ok else 'bad'}">{_esc(verdict)}</span></td>
     </tr></tbody>
@@ -2606,10 +2648,8 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
 </section>
 
 <section>
-  <h2>Steps &mdash; {passed} of {total} passed</h2>
-  <table><tbody>
-    {''.join(step_rows) or '<tr><td colspan="2">No steps recorded.</td></tr>'}
-  </tbody></table>
+  <h2>Steps &mdash; {step_passed} of {step_total} passed</h2>
+  {''.join(blocks) or '<div style="padding:20px;color:var(--ink-3)">No steps recorded.</div>'}
 </section>
 
 <footer>
