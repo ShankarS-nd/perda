@@ -24,6 +24,25 @@ interface Comment {
   created_at: string;
 }
 
+interface Run {
+  id: number;
+  testcase_id: number;
+  device_id: string;
+  device_ip: string;
+  device_type: string;
+  build: string;
+  status: string;
+  steps_total: number;
+  steps_passed: number;
+  steps_failed: number;
+  duration: string;
+  started_at: string;
+  ended_at: string;
+  collection: string;
+  steps: Record<string, string>[];
+  created_at: string;
+}
+
 interface Testcase {
   id: number;
   tc_key: string;
@@ -185,6 +204,8 @@ let noteId = 0;
 
 export default function ReviewBench() {
   const [items, setItems] = useState<Testcase[]>([]);
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [openSteps, setOpenSteps] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [queue, setQueue] = useState<Queue>("pending");
@@ -230,9 +251,15 @@ export default function ReviewBench() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/review/testcases`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setItems(await res.json());
+      const [tcRes, runRes] = await Promise.all([
+        fetch(`${API_BASE}/review/testcases`),
+        fetch(`${API_BASE}/review/runs?limit=200`),
+      ]);
+      if (!tcRes.ok) throw new Error(`HTTP ${tcRes.status}`);
+      setItems(await tcRes.json());
+      // Runs are optional: a backend without /review/runs should still render the
+      // bench rather than failing the whole page over a missing endpoint.
+      setRuns(runRes.ok ? await runRes.json() : []);
       setError(null);
     } catch (e) {
       setError(
@@ -695,6 +722,96 @@ export default function ReviewBench() {
             <div ref={detailRef} className="main-content min-h-0 flex-1 overflow-y-auto pr-2">
               <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_312px]">
                 <div className="flex min-w-0 flex-col gap-5">
+                {/* latest run — the verdict, before the code that produced it */}
+                {(() => {
+                  const mine = runs.filter((r) => r.testcase_id === current.id);
+                  const last = mine[0];
+                  if (!last) {
+                    return (
+                      <section className="ds-card">
+                        <div className="flex flex-wrap items-center gap-4 px-6 py-4">
+                          <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">
+                            Test run
+                          </span>
+                          <span className="text-[14px] text-gray-600">
+                            Not run yet — no execution has been recorded against this testcase.
+                          </span>
+                        </div>
+                      </section>
+                    );
+                  }
+                  const pass = last.status === "Pass";
+                  return (
+                    <section className="ds-card overflow-hidden">
+                      <div className="flex flex-wrap items-center gap-4 border-b border-white/[0.055] px-6 py-4">
+                        <span className="font-mono text-[11px] uppercase tracking-widest text-gray-500">
+                          Latest run
+                        </span>
+                        <span className={`ds-badge ${pass ? "ds-badge-success" : "ds-badge-error"}`}>
+                          {last.status}
+                        </span>
+                        <span className="font-mono text-[12.5px] text-gray-400">
+                          {last.steps_passed} passed
+                          {last.steps_failed > 0 && (
+                            <span className="text-rose-400"> · {last.steps_failed} failed</span>
+                          )}
+                          <span className="text-gray-600"> of {last.steps_total}</span>
+                        </span>
+                        <span className="ml-auto flex flex-wrap items-center gap-2.5 font-mono text-[12px] text-gray-600">
+                          <span>{last.device_id}</span>
+                          {last.device_type && <><span className="text-gray-700">·</span><span>{last.device_type}</span></>}
+                          {last.build && <><span className="text-gray-700">·</span><span>{last.build}</span></>}
+                          <span className="text-gray-700">·</span><span>{last.duration}</span>
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4 px-6 py-3">
+                        <span className="font-mono text-[12px] text-gray-600">
+                          {last.started_at} → {last.ended_at}
+                        </span>
+                        {mine.length > 1 && (
+                          <span className="font-mono text-[11.5px] text-gray-600">
+                            {mine.length} runs recorded
+                          </span>
+                        )}
+                        <button
+                          className="ml-auto flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wider text-gray-500 transition-colors hover:text-indigo-300"
+                          onClick={() => setOpenSteps((o) => !o)}
+                        >
+                          <IconChevron open={openSteps} />
+                          {openSteps ? "Hide steps" : `Show all ${last.steps_total} steps`}
+                        </button>
+                      </div>
+                      {openSteps && (
+                        <div className="scrollbar-thin max-h-[44vh] overflow-auto border-t border-white/[0.055] bg-[#0d0f16]">
+                          {last.steps.map((st, i) => {
+                            const [label, result] = Object.entries(st)[0] ?? ["", ""];
+                            const heading = /^-{2,}.*-{2,}$/.test(label.trim());
+                            const ok = result === "Pass";
+                            return (
+                              <div
+                                key={i}
+                                className={`flex items-start gap-3 px-6 py-2 ${
+                                  heading ? "bg-white/[0.03] font-semibold" : ""
+                                } ${i > 0 ? "border-t border-white/[0.03]" : ""}`}
+                              >
+                                <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${ok ? "bg-emerald-400" : "bg-rose-400"}`} />
+                                <span className={`min-w-0 flex-1 break-words font-mono text-[12.5px] leading-relaxed ${
+                                  heading ? "text-gray-300" : "text-gray-400"
+                                }`}>
+                                  {label.replace(/^-+|-+$/g, "") || "(step)"}
+                                </span>
+                                <span className={`shrink-0 font-mono text-[11px] ${ok ? "text-emerald-400" : "text-rose-400"}`}>
+                                  {result}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })()}
+
                 {/* source */}
                 <section className="ds-card overflow-hidden">
                   <div className="flex items-center gap-4 border-b border-white/[0.055] px-6 py-3.5">

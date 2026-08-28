@@ -27,6 +27,8 @@ Provides:
   add_review_comment()       → post a comment on a testcase
   set_comment_resolved()     → resolve / reopen a comment
   delete_review_comment()    → remove a comment
+  save_review_run()          → record an execution of a testcase on a device
+  get_review_runs()          → runs for a testcase, newest first
 """
 
 from __future__ import annotations
@@ -146,6 +148,33 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_review_comments_tc
                 ON review_comments(testcase_id);
+
+            -- One row per execution. The framework's own report is served by a
+            -- short-lived Flask process on whichever machine ran the suite, so a
+            -- link to it dies with the run; the verdict and per-step results are
+            -- copied here instead and stay readable for good.
+            CREATE TABLE IF NOT EXISTS review_runs (
+                id            INTEGER  PRIMARY KEY AUTOINCREMENT,
+                testcase_id   INTEGER  NOT NULL REFERENCES review_testcases(id) ON DELETE CASCADE,
+                device_id     TEXT     NOT NULL DEFAULT '',
+                device_ip     TEXT     NOT NULL DEFAULT '',
+                device_type   TEXT     NOT NULL DEFAULT '',
+                build         TEXT     NOT NULL DEFAULT '',
+                status        TEXT     NOT NULL DEFAULT 'unknown',
+                steps_total   INTEGER  NOT NULL DEFAULT 0,
+                steps_passed  INTEGER  NOT NULL DEFAULT 0,
+                steps_failed  INTEGER  NOT NULL DEFAULT 0,
+                duration      TEXT     NOT NULL DEFAULT '',
+                started_at    TEXT     NOT NULL DEFAULT '',
+                ended_at      TEXT     NOT NULL DEFAULT '',
+                steps_json    TEXT     NOT NULL DEFAULT '[]',
+                collection    TEXT     NOT NULL DEFAULT '',
+                report_url    TEXT,
+                created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_review_runs_tc
+                ON review_runs(testcase_id);
         """)
         conn.commit()
     finally:
@@ -603,5 +632,82 @@ def delete_review_comment(comment_id: int) -> bool:
         cur = conn.execute("DELETE FROM review_comments WHERE id = ?", (comment_id,))
         conn.commit()
         return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def save_review_run(tc_key: str, run: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Record one execution of a testcase against a device.
+
+    Steps are stored verbatim as JSON so the report can be rebuilt exactly as the
+    framework reported it, without keeping the framework's report server alive.
+    """
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT id FROM review_testcases WHERE tc_key = ?", (tc_key,)
+        ).fetchone()
+        if not row:
+            return None
+
+        steps = run.get("steps") or []
+        passed = sum(1 for s in steps for v in s.values() if v == "Pass")
+        failed = sum(1 for s in steps for v in s.values() if v == "Fail")
+
+        cur = conn.execute(
+            """
+            INSERT INTO review_runs
+                (testcase_id, device_id, device_ip, device_type, build, status,
+                 steps_total, steps_passed, steps_failed, duration,
+                 started_at, ended_at, steps_json, collection, report_url, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                row["id"],
+                run.get("device_id", ""), run.get("device_ip", ""),
+                run.get("device_type", ""), run.get("build", ""),
+                run.get("status", "unknown"),
+                len(steps), passed, failed,
+                run.get("duration", ""),
+                run.get("started_at", ""), run.get("ended_at", ""),
+                json.dumps(steps), run.get("collection", ""),
+                run.get("report_url"),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
+        saved = conn.execute("SELECT * FROM review_runs WHERE id = ?", (cur.lastrowid,)).fetchone()
+        out = dict(saved)
+        out["steps"] = json.loads(out.pop("steps_json") or "[]")
+        return out
+    finally:
+        conn.close()
+
+
+def get_review_runs(tc_key: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    """Runs for one testcase (or the latest across all), newest first."""
+    conn = _connect()
+    try:
+        if tc_key:
+            rows = conn.execute(
+                """
+                SELECT r.* FROM review_runs r
+                  JOIN review_testcases t ON t.id = r.testcase_id
+                 WHERE t.tc_key = ?
+                 ORDER BY r.created_at DESC LIMIT ?
+                """,
+                (tc_key, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM review_runs ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["steps"] = json.loads(d.pop("steps_json") or "[]")
+            out.append(d)
+        return out
     finally:
         conn.close()

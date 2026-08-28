@@ -132,6 +132,8 @@ from database import (
     add_review_comment,
     set_comment_resolved,
     delete_review_comment,
+    save_review_run,
+    get_review_runs,
 )
 from workflow_engine import run_workflow
 
@@ -2332,3 +2334,38 @@ async def review_delete_comment(comment_id: int):
     if not delete_review_comment(comment_id):
         raise HTTPException(status_code=404, detail="Comment not found")
     return {"id": comment_id, "deleted": True}
+
+
+class ReviewRunRequest(BaseModel):
+    device_id: str = ""
+    device_ip: str = ""
+    device_type: str = ""
+    build: str = ""
+    status: str = "unknown"          # Pass | Fail | unknown
+    duration: str = ""
+    started_at: str = ""
+    ended_at: str = ""
+    collection: str = ""             # the framework's Mongo report collection
+    report_url: str | None = None
+    steps: list[dict[str, Any]] = []
+
+
+@app.get("/review/runs")
+async def review_runs(tc_key: str | None = Query(None), limit: int = Query(20, ge=1, le=200)):
+    """Execution history — for one testcase if tc_key is given, else the latest overall."""
+    return get_review_runs(tc_key, limit)
+
+
+@app.post("/review/testcases/{tc_key}/runs")
+async def review_add_run(tc_key: str, payload: ReviewRunRequest):
+    """
+    Record an execution of this testcase.
+
+    The framework serves its own report from a short-lived process on whichever
+    machine ran the suite, so that link dies with the run. The verdict and every
+    step are copied here instead, and stay readable afterwards.
+    """
+    run = save_review_run(tc_key, payload.model_dump())
+    if run is None:
+        raise HTTPException(status_code=404, detail="Testcase not found")
+    return run
