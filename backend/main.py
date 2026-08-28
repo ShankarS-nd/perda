@@ -2386,93 +2386,177 @@ def _esc(v: Any) -> str:
             .replace('"', "&quot;"))
 
 
+_REPORT_ASSETS = Path(__file__).resolve().parent / "report_assets"
+
+
+def _framework_css() -> str:
+    try:
+        return (_REPORT_ASSETS / "framework_styles.css").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _framework_logo() -> str:
+    try:
+        return (_REPORT_ASSETS / "logo_b64.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
+    """
+    Reproduce the framework's own DAST Report for a stored run.
+
+    Same stylesheet, same table structure and class names as
+    Interface/templates/index.html. The difference is that every figure is
+    filled in server-side: the framework's page leaves its tbodies empty and
+    lets scr.js populate them over gRPC, which is why a captured copy shows
+    all zeros. Rendering here means the report is correct with no live
+    framework, no Mongo and no JavaScript.
+    """
     steps = run.get("steps") or []
-    rows = []
+    verdict = run.get("status", "unknown")
+    passed_tc = 1 if verdict == "Pass" else 0
+    failed_tc = 1 if verdict == "Fail" else 0
+    ne_tc = 1 if verdict not in ("Pass", "Fail") else 0
+    total_tc = 1
+    pass_pct = f"{(passed_tc / total_tc) * 100:.0f}%" if total_tc else "0%"
+
+    service = (tc.get("component") or "—").split("(")[0].strip()
+    device_id = run.get("device_id") or "—"
+
+    # --- overall stats -----------------------------------------------------
+    overall_row = (
+        "<tr>"
+        f"<td>{_esc(run.get('device_type') or '—')}</td>"
+        f"<td>{_esc(device_id)}</td>"
+        f"<td>{_esc(run.get('build') or '—')}</td>"
+        f"<td>{_esc(run.get('build') or '—')}</td>"
+        f"<td>{_esc(run.get('device_ip') or '—')}</td>"
+        f"<td>{_esc(run.get('started_at') or '—')}</td>"
+        f"<td>{total_tc}</td>"
+        f'<td id="pass">{passed_tc}</td>'
+        f'<td id="fail">{failed_tc}</td>'
+        f"<td>{ne_tc}</td><td>0</td></tr>"
+    )
+
+    service_row = (
+        "<tr>"
+        f"<td>{_esc(device_id)}</td>"
+        f"<td>{_esc(service)}</td>"
+        f"<td>{total_tc}</td>"
+        f'<td id="pass">{passed_tc}</td>'
+        f'<td id="fail">{failed_tc}</td>'
+        f"<td>{ne_tc}</td><td>0</td>"
+        f"<td>{pass_pct}</td>"
+        f"<td>{_esc(run.get('duration') or '—')}</td></tr>"
+    )
+
+    status_cls = "pass" if verdict == "Pass" else "fail"
+    tc_row = (
+        "<tr>"
+        f"<td>{_esc(tc.get('tc_id'))}</td>"
+        f'<td style="text-align:left">{_esc(tc.get("tc_summary"))}</td>'
+        f'<td id="{status_cls}"><b>{_esc(verdict)}</b></td></tr>'
+    )
+
+    # --- per-step detail, in the framework's results-table styling ---------
+    step_rows = []
     for step in steps:
         for label, result in step.items():
-            heading = label.strip().startswith("--") and label.strip().endswith("--")
-            name = label.strip("-").strip() if heading else label
-            ok = result == "Pass"
-            if heading:
-                rows.append(
-                    f'<tr class="sec"><td colspan="2">{_esc(name)}</td></tr>'
+            bare = label.strip()
+            if bare.startswith("--") and bare.endswith("--"):
+                step_rows.append(
+                    f'<tr><td colspan="2" class="bold-text" '
+                    f'style="background:#eef1f6">{_esc(bare.strip("-").strip())}</td></tr>'
                 )
             else:
-                rows.append(
-                    f'<tr><td class="step">{_esc(name)}</td>'
-                    f'<td class="res {"ok" if ok else "bad"}">{_esc(result)}</td></tr>'
+                sid = "pass" if result == "Pass" else "fail"
+                step_rows.append(
+                    f'<tr><td style="text-align:left">{_esc(label)}</td>'
+                    f'<td id="{sid}"><b>{_esc(result)}</b></td></tr>'
                 )
 
-    verdict = run.get("status", "unknown")
-    ok = verdict == "Pass"
-    total = run.get("steps_total", len(steps))
-    passed = run.get("steps_passed", 0)
-    failed = run.get("steps_failed", 0)
-
-    def stat(label: str, value: Any, cls: str = "") -> str:
-        return (f'<div class="stat"><div class="k">{_esc(label)}</div>'
-                f'<div class="v {cls}">{_esc(value)}</div></div>')
+    logo = _framework_logo()
+    logo_img = (f'<img src="data:image/png;base64,{logo}" alt="Netradyne" '
+                f'style="height:42px;vertical-align:middle;margin-right:14px">') if logo else ""
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(tc.get('tc_id'))} — test report</title>
+<title>DAST Report — {_esc(tc.get('tc_id'))}</title>
 <style>
- :root{{--bg:#0f1117;--card:#1a1d28;--line:rgba(255,255,255,.08);--ink:#e5e7eb;
-   --dim:#9ca3af;--faint:#6b7280;--ok:#4ade80;--bad:#f87171;--accent:#818cf8}}
- *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--ink);
-   font:15px/1.6 "IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;padding:40px 28px}}
- .wrap{{max-width:1000px;margin:0 auto}}
- h1{{font-size:24px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}}
- h1 .id{{font-family:"IBM Plex Mono",ui-monospace,monospace}}
- .sub{{color:var(--dim);font-size:14px;margin-bottom:24px}}
- .sub a{{color:var(--accent);text-decoration:none}} .sub a:hover{{text-decoration:underline}}
- .verdict{{display:inline-block;padding:4px 14px;border-radius:999px;font-weight:600;
-   font-size:13px;margin-left:10px;vertical-align:middle}}
- .verdict.ok{{background:rgba(34,197,94,.12);color:var(--ok);border:1px solid rgba(34,197,94,.25)}}
- .verdict.bad{{background:rgba(239,68,68,.12);color:var(--bad);border:1px solid rgba(239,68,68,.25)}}
- .stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
-   background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:28px}}
- .stat{{background:var(--card);padding:14px 16px}}
- .stat .k{{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;
-   text-transform:uppercase;color:var(--faint);margin-bottom:6px}}
- .stat .v{{font-family:"IBM Plex Mono",monospace;font-size:15px;color:var(--ink)}}
- .stat .v.ok{{color:var(--ok)}} .stat .v.bad{{color:var(--bad)}}
- h2{{font-size:12px;font-family:"IBM Plex Mono",monospace;letter-spacing:.14em;
-   text-transform:uppercase;color:var(--faint);margin:0 0 12px}}
- table{{width:100%;border-collapse:collapse;background:var(--card);
-   border:1px solid var(--line);border-radius:12px;overflow:hidden}}
- td{{padding:9px 16px;border-top:1px solid rgba(255,255,255,.04);vertical-align:top}}
- tr:first-child td{{border-top:0}}
- .sec td{{background:rgba(255,255,255,.035);font-weight:600;
-   font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.06em;color:var(--dim)}}
- .step{{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--dim);word-break:break-word}}
- .res{{font-family:"IBM Plex Mono",monospace;font-size:12px;text-align:right;width:70px;white-space:nowrap}}
- .res.ok{{color:var(--ok)}} .res.bad{{color:var(--bad)}}
- footer{{margin-top:24px;color:var(--faint);font-size:12px;
-   font-family:"IBM Plex Mono",monospace}}
- @media print{{body{{background:#fff;color:#111}}
-   .stat,table{{background:#fff}} .res.ok{{color:#137333}} .res.bad{{color:#b3261e}}}}
-</style></head><body><div class="wrap">
-<h1><span class="id">{_esc(tc.get('tc_id'))}</span>
-  <span class="verdict {'ok' if ok else 'bad'}">{_esc(verdict)}</span></h1>
-<div class="sub">{_esc(tc.get('tc_summary'))}<br>
-  <a href="{_esc(tc.get('dt_url'))}">{_esc(tc.get('dt'))}</a> — {_esc(tc.get('dt_summary'))}</div>
-<div class="stats">
-  {stat('Steps', f'{passed} / {total} passed', 'ok' if not failed else 'bad')}
-  {stat('Failed', failed, 'bad' if failed else '')}
-  {stat('Device', run.get('device_id'))}
-  {stat('Type', run.get('device_type') or '—')}
-  {stat('Build', run.get('build') or '—')}
-  {stat('Duration', run.get('duration') or '—')}
-  {stat('Started', run.get('started_at') or '—')}
-  {stat('Ended', run.get('ended_at') or '—')}
+{_framework_css()}
+/* Additions for the standalone copy: the framework page relies on Bootstrap
+   from a CDN and on scr.js for layout that only exists once data loads. */
+body {{ padding: 0 24px 60px; }}
+h1 {{ display: flex; align-items: center; justify-content: center; }}
+.meta-line {{ text-align:center; color:#555; font-size:14px; margin:-8px 0 26px; }}
+.meta-line a {{ color:#1a4ed8; text-decoration:none; }}
+.meta-line a:hover {{ text-decoration:underline; }}
+table {{ margin-bottom: 34px; }}
+.step-table td:first-child {{ font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12.5px; }}
+.step-table td:last-child {{ width: 90px; text-align: center; }}
+@media print {{ body {{ padding: 0; }} }}
+</style></head><body>
+
+<h1>{logo_img}DAST Report</h1>
+<div class="meta-line">
+  {_esc(tc.get('tc_id'))} &middot;
+  <a href="{_esc(tc.get('dt_url'))}">{_esc(tc.get('dt'))}</a> &middot;
+  {_esc(tc.get('dt_summary'))}
 </div>
-<h2>Steps</h2>
-<table>{''.join(rows) or '<tr><td colspan="2">No steps recorded.</td></tr>'}</table>
-<footer>Generated by perda from run #{run.get('id')} &middot; framework collection {_esc(run.get('collection') or '—')}</footer>
-</div></body></html>"""
+
+<h3 class="Test_Table_start_heading" id="overall-summary">Overall Summary</h3>
+<table class="Test_Info" id="overallStatsTable">
+  <thead><tr>
+    <th>SKU</th><th>Device ID</th><th>OS Version</th><th>OTA Version</th>
+    <th>IP Address</th><th>Start Timestamp</th><th>Total Test Cases</th>
+    <th>Pass</th><th>Fail</th><th>Not Executed</th><th>Not Applicable</th>
+  </tr></thead>
+  <tbody id="overallStatsTableBody">{overall_row}</tbody>
+  <tfoot id="totalRow"><tr>
+    <th colspan="6">Total</th>
+    <th id="totalTestCases">{total_tc}</th>
+    <th id="totalPass">{passed_tc}</th>
+    <th id="totalFail">{failed_tc}</th>
+    <th id="totalNotExecuted">{ne_tc}</th>
+    <th id="totalNotApplicable">0</th>
+  </tr></tfoot>
+</table>
+
+<h2 class="Test_Table_heading">Service Level Summary</h2>
+<table class="service_level_info" id="serviceLevelTable">
+  <thead><tr>
+    <th>Device ID</th><th>Service Name</th><th>Total TC</th><th>Pass</th>
+    <th>Fail</th><th>Not Executed</th><th>Not Applicable</th><th>Pass%</th>
+    <th>Time Consumed</th>
+  </tr></thead>
+  <tbody id="serviceLevelTableBody">{service_row}</tbody>
+</table>
+
+<h2 class="Test_Table_heading">Test Cases</h2>
+<table class="Test_Tables_results">
+  <thead><tr id="header-row">
+    <th style="font-size: larger;">Test Id</th>
+    <th style="font-size: larger; text-align: left;">Description</th>
+    <th style="font-size: larger;">{_esc(device_id)}</th>
+  </tr></thead>
+  <tbody id="OverallStatsTableWithDeviceID">{tc_row}</tbody>
+</table>
+
+<h2 class="Test_Table_heading">Test Steps &mdash; {_esc(tc.get('tc_id'))}</h2>
+<table class="Test_Tables_results step-table">
+  <thead><tr><th style="text-align:left">Step</th><th>Result</th></tr></thead>
+  <tbody>{''.join(step_rows) or '<tr><td colspan="2">No steps recorded.</td></tr>'}</tbody>
+</table>
+
+<div class="meta-line" style="margin-top:30px">
+  Run #{run.get('id')} &middot; duration {_esc(run.get('duration') or '—')} &middot;
+  {_esc(run.get('started_at'))} &rarr; {_esc(run.get('ended_at'))} &middot;
+  framework collection {_esc(run.get('collection') or '—')}
+</div>
+</body></html>"""
 
 
 @app.get("/review/runs/{run_id}/report", response_class=HTMLResponse)
