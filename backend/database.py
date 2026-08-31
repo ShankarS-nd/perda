@@ -636,6 +636,39 @@ def delete_review_comment(comment_id: int) -> bool:
         conn.close()
 
 
+def delete_review_testcase(tc_key: str) -> dict[str, int] | None:
+    """
+    Remove a testcase from the bench along with its comments and recorded runs.
+
+    Used to retire something that should never have been queued for sign-off: a
+    candidate with no passing run, or one superseded by existing coverage.
+
+    The child tables declare ON DELETE CASCADE, but connections here do not set
+    `PRAGMA foreign_keys=ON`, so SQLite never enforces it — the children are
+    deleted explicitly rather than left orphaned. Returns None if `tc_key` is
+    unknown, else the counts removed.
+    """
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT id FROM review_testcases WHERE tc_key = ?", (tc_key,)
+        ).fetchone()
+        if row is None:
+            return None
+        tc_id = row["id"]
+        runs = conn.execute(
+            "DELETE FROM review_runs WHERE testcase_id = ?", (tc_id,)
+        ).rowcount
+        comments = conn.execute(
+            "DELETE FROM review_comments WHERE testcase_id = ?", (tc_id,)
+        ).rowcount
+        conn.execute("DELETE FROM review_testcases WHERE id = ?", (tc_id,))
+        conn.commit()
+        return {"runs": runs, "comments": comments}
+    finally:
+        conn.close()
+
+
 def save_review_run(tc_key: str, run: dict[str, Any]) -> dict[str, Any] | None:
     """
     Record one execution of a testcase against a device.

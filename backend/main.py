@@ -133,6 +133,7 @@ from database import (
     add_review_comment,
     set_comment_resolved,
     delete_review_comment,
+    delete_review_testcase,
     save_review_run,
     get_review_runs,
 )
@@ -2305,6 +2306,21 @@ async def review_set_status(tc_key: str, payload: ReviewStatusRequest):
     if not set_review_status(tc_key, payload.status, payload.reviewer):
         raise HTTPException(status_code=404, detail="Testcase not found")
     return {"tc_key": tc_key, "status": payload.status}
+
+
+@app.delete("/review/testcases/{tc_key}")
+async def review_delete_testcase(tc_key: str):
+    """
+    Retire a testcase from the bench, with its comments and recorded runs.
+
+    For candidates that should never have been queued for sign-off — no passing
+    run, or superseded by existing coverage. A testcase removed here comes back
+    on the next push only once it qualifies again.
+    """
+    removed = delete_review_testcase(tc_key)
+    if removed is None:
+        raise HTTPException(status_code=404, detail="Testcase not found")
+    return {"tc_key": tc_key, "deleted": True, **removed}
 
 
 @app.post("/review/testcases/{tc_key}/comments")
