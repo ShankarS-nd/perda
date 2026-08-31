@@ -161,6 +161,11 @@ def init_db() -> None:
                 device_type   TEXT     NOT NULL DEFAULT '',
                 build         TEXT     NOT NULL DEFAULT '',
                 status        TEXT     NOT NULL DEFAULT 'unknown',
+                -- 'fixed'  = a device carrying the fix; the run should Pass.
+                -- 'prefix' = a device on a build predating the fix; the run is
+                -- EXPECTED to Fail, and that failure is the evidence the test
+                -- actually detects the bug rather than passing vacuously.
+                device_stage  TEXT     NOT NULL DEFAULT 'fixed',
                 steps_total   INTEGER  NOT NULL DEFAULT 0,
                 steps_passed  INTEGER  NOT NULL DEFAULT 0,
                 steps_failed  INTEGER  NOT NULL DEFAULT 0,
@@ -176,6 +181,16 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_review_runs_tc
                 ON review_runs(testcase_id);
         """)
+
+        # CREATE TABLE IF NOT EXISTS leaves an already-created table alone, so a
+        # column added after a database exists has to be migrated in by hand.
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(review_runs)")}
+        if "device_stage" not in have:
+            conn.execute(
+                "ALTER TABLE review_runs "
+                "ADD COLUMN device_stage TEXT NOT NULL DEFAULT 'fixed'"
+            )
+
         conn.commit()
     finally:
         conn.close()
@@ -692,15 +707,16 @@ def save_review_run(tc_key: str, run: dict[str, Any]) -> dict[str, Any] | None:
             """
             INSERT INTO review_runs
                 (testcase_id, device_id, device_ip, device_type, build, status,
-                 steps_total, steps_passed, steps_failed, duration,
+                 device_stage, steps_total, steps_passed, steps_failed, duration,
                  started_at, ended_at, steps_json, collection, report_url, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 row["id"],
                 run.get("device_id", ""), run.get("device_ip", ""),
                 run.get("device_type", ""), run.get("build", ""),
                 run.get("status", "unknown"),
+                "prefix" if run.get("device_stage") == "prefix" else "fixed",
                 len(steps), passed, failed,
                 run.get("duration", ""),
                 run.get("started_at", ""), run.get("ended_at", ""),
@@ -719,22 +735,32 @@ def save_review_run(tc_key: str, run: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def get_review_runs(tc_key: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-    """Runs for one testcase (or the latest across all), newest first."""
+    """
+    Runs for one testcase (or the latest across all), newest first.
+
+    Fixed-device runs sort ahead of pre-fix ones. Callers treat the first row for
+    a testcase as its headline verdict, and a pre-fix run is *expected* to fail —
+    letting one lead would show a green, signed-off testcase as failing purely
+    because its bug-detection evidence was recorded most recently. Pre-fix runs
+    stay in the history right behind, and keep their own report.
+    """
     conn = _connect()
     try:
+        order = "CASE WHEN {p}device_stage = 'prefix' THEN 1 ELSE 0 END ASC, {p}created_at DESC"
         if tc_key:
             rows = conn.execute(
-                """
+                f"""
                 SELECT r.* FROM review_runs r
                   JOIN review_testcases t ON t.id = r.testcase_id
                  WHERE t.tc_key = ?
-                 ORDER BY r.created_at DESC LIMIT ?
+                 ORDER BY {order.format(p='r.')} LIMIT ?
                 """,
                 (tc_key, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM review_runs ORDER BY created_at DESC LIMIT ?", (limit,)
+                f"SELECT * FROM review_runs ORDER BY {order.format(p='')} LIMIT ?",
+                (limit,),
             ).fetchall()
         out = []
         for r in rows:

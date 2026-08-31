@@ -2359,6 +2359,7 @@ class ReviewRunRequest(BaseModel):
     device_type: str = ""
     build: str = ""
     status: str = "unknown"          # Pass | Fail | unknown
+    device_stage: str = "fixed"      # fixed | prefix (prefix runs are meant to fail)
     duration: str = ""
     started_at: str = ""
     ended_at: str = ""
@@ -2561,7 +2562,14 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
     """
     groups = _group_steps(run.get("steps") or [])
     verdict = run.get("status", "unknown")
-    ok = verdict == "Pass"
+
+    # A pre-fix run is executed against a build that predates the fix, so failing
+    # is the desired outcome — it is what proves the test detects the bug instead
+    # of passing vacuously. Read the whole report through that lens: "good" means
+    # "as expected", which inverts for these runs. A pre-fix run that PASSES is
+    # the alarming case, because the test cannot tell fixed from unfixed.
+    prefix = (run.get("device_stage") or "fixed") == "prefix"
+    ok = (verdict == "Fail") if prefix else (verdict == "Pass")
 
     step_total = len(groups)
     step_passed = sum(1 for g in groups if g["result"] == "Pass")
@@ -2612,8 +2620,24 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
   </div>
   <div class="tc-line">
     <h1>{_esc(tc.get('tc_id'))}</h1>
-    <span class="pill {'ok' if ok else 'bad'}"><span class="dot"></span>{_esc(verdict)}</span>
+    <span class="pill {'ok' if ok else 'bad'}"><span class="dot"></span>{_esc(
+        f"{verdict} — expected" if prefix and ok
+        else f"{verdict} — UNEXPECTED" if prefix
+        else verdict)}</span>
+    {'<span class="pill">pre-fix device</span>' if prefix else ''}
   </div>
+  {(
+    '<div class="ticket"><strong>Pre-fix device.</strong> This build predates the '
+    'fix, so the testcase is <em>expected</em> to fail here — the failure below is '
+    'the evidence that it genuinely detects the bug rather than passing vacuously. '
+    'The sign-off verdict comes from the fixed-device run.</div>'
+    if prefix and ok else
+    '<div class="ticket"><strong>Pre-fix device — unexpected pass.</strong> This '
+    'build predates the fix, so the testcase should have failed here. Passing means '
+    'it cannot tell a fixed device from an unfixed one, and does not yet prove '
+    'anything about the fix.</div>'
+    if prefix else ''
+  )}
   <div class="ticket">
     <a href="{_esc(tc.get('dt_url'))}">{_esc(tc.get('dt'))}</a> — {_esc(tc.get('dt_summary'))}
     <span class="sum">{_esc(tc.get('tc_summary'))}</span>
@@ -2622,7 +2646,10 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
 
 <div class="kpis">
   {kpi('Result', _esc(verdict), 'ok' if ok else 'bad',
-       'every step passed' if ok and not step_failed else f'{step_failed} step(s) failed')}
+       (f'{step_failed} step(s) failed, as expected on a pre-fix build' if prefix and ok
+        else 'passed on a build without the fix — test cannot detect the bug' if prefix
+        else 'every step passed' if ok and not step_failed
+        else f'{step_failed} step(s) failed'))}
   {kpi('Steps', f'{step_passed}<span style="color:var(--ink-4)">/{step_total}</span>', '',
        f'{checks} checks underneath', f'<div class="bar"><i style="width:{pct}%"></i></div>')}
   {kpi('Duration', _esc(run.get('duration') or '—'), '', 'wall clock')}
@@ -2634,6 +2661,8 @@ def _render_run_report(tc: dict[str, Any], run: dict[str, Any]) -> str:
   <dl class="facts">
     {fact('Device ID', run.get('device_id'))}
     {fact('Device type', run.get('device_type'))}
+    {fact('Device stage', 'pre-fix (build predates the fix)' if prefix
+                          else 'fixed (build carries the fix)')}
     {fact('IP address', run.get('device_ip'))}
     {fact('Build', run.get('build'))}
     {fact('Service', service)}
