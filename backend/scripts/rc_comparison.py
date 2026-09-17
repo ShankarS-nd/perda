@@ -32,6 +32,7 @@ import re
 import sys
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 
 import requests
@@ -52,6 +53,40 @@ SCRIPT_OUTPUTS = "./output/rc_comparison"
 # Local cache directory for pre-downloaded scr.js files
 # Stored at  backend/cache/scrjs/<build_number>.js
 SCRJS_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "scrjs"
+
+# scr.js reports run 50-250MB. On a slow/flaky link to Jenkins a mid-transfer
+# hiccup surfaces as requests.exceptions.ChunkedEncodingError with the
+# message "Response ended prematurely" rather than a clean timeout — retry
+# the whole fetch attempt a few times before giving up.
+DOWNLOAD_RETRIES = 3
+DOWNLOAD_RETRY_BACKOFF_SEC = 5
+_TRANSIENT_TRANSFER_ERRORS = (
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+)
+
+
+def _retry_transient(fn, *, what: str):
+    """Run fn(), retrying on a transient network/transfer failure.
+
+    fn() should perform one full fetch attempt (a large download can't be
+    resumed mid-stream, so a failed attempt is simply redone from scratch).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, DOWNLOAD_RETRIES + 1):
+        try:
+            return fn()
+        except _TRANSIENT_TRANSFER_ERRORS as exc:
+            last_exc = exc
+            if attempt < DOWNLOAD_RETRIES:
+                wait = DOWNLOAD_RETRY_BACKOFF_SEC * attempt
+                print(
+                    f"    ⚠ {what}: transfer interrupted ({exc.__class__.__name__}), "
+                    f"retrying in {wait}s… (attempt {attempt}/{DOWNLOAD_RETRIES})"
+                )
+                time.sleep(wait)
+    raise last_exc
 
 # ── Device serial-number registries per platform ────────────────────
 # Each key is a platform label; value is a list of serial numbers.
@@ -329,9 +364,13 @@ def fetch_report_js(
         print(f"  ✓ Using cached scr.js for build {build_number} ({cache_file.stat().st_size:,} bytes)")
         return cache_file.read_text(encoding="utf-8")
 
-    js = _fetch_published_scrjs(build_number, session)
-    if js is None:
-        js = _fetch_artifact_scrjs(build_number, session)
+    def _attempt() -> str:
+        js = _fetch_published_scrjs(build_number, session)
+        if js is None:
+            js = _fetch_artifact_scrjs(build_number, session)
+        return js
+
+    js = _retry_transient(_attempt, what=f"build {build_number}")
 
     # Always persist to cache so future calls skip Jenkins entirely
     SCRJS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -384,77 +423,81 @@ def fetch_report_js_from_url(
 
     is_default_host = (url_host == default_host)
 
-    # Try published scr.js
-    pub_url = f"{job_base_url}/{build_number}/Test_5freport/static/scr.js"
-    print(f"  ↓ Trying published report data: {pub_url}")
-    js: str | None = None
-    try:
-        resp = sess.get(pub_url, timeout=120, allow_redirects=not is_default_host)
-        if is_default_host:
-            if _is_auth_redirect(resp):
-                sys.exit(
-                    "❌ Jenkins authentication failed (redirect to login). "
-                    "Your JENKINS_TOKEN has likely expired."
-                )
-            _check_auth(resp)
-        if resp.status_code == 200:
-            print(f"    ✓ Downloaded ({len(resp.content):,} bytes)")
-            js = resp.text
-        elif is_default_host and resp.status_code in (301, 302, 303, 307, 308):
-            resp2 = sess.get(resp.headers.get("Location", pub_url), timeout=120)
-            _check_auth(resp2)
-            if resp2.status_code == 200:
-                js = resp2.text
-    except requests.exceptions.TooManyRedirects:
-        pass
-
-    # Fall back to artifact
-    if js is None:
-        art_url = f"{job_base_url}/{build_number}/artifact/report/report.tar.gz"
-        print(f"  ↓ Trying artifact: {art_url}")
+    def _attempt() -> str | None:
+        # Try published scr.js
+        pub_url = f"{job_base_url}/{build_number}/Test_5freport/static/scr.js"
+        print(f"  ↓ Trying published report data: {pub_url}")
+        js: str | None = None
         try:
-            resp = sess.get(art_url, timeout=60, stream=True, allow_redirects=not is_default_host)
+            resp = sess.get(pub_url, timeout=120, allow_redirects=not is_default_host)
             if is_default_host:
                 if _is_auth_redirect(resp):
-                    sys.exit("❌ Jenkins auth failed (redirect to login).")
-                _check_auth(resp)
-            if is_default_host and resp.status_code in (301, 302, 303, 307, 308):
-                resp = sess.get(resp.headers.get("Location", art_url), timeout=60, stream=True)
-                _check_auth(resp)
-            if resp.status_code == 404:
-                raise RuntimeError(
-                    f"Build at {jenkins_url}: Neither published report nor "
-                    f"artifact report.tar.gz found."
-                )
-            resp.raise_for_status()
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tar_path = os.path.join(tmpdir, "report.tar.gz")
-                with open(tar_path, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        f.write(chunk)
-                with tarfile.open(tar_path, "r:gz") as tar:
-                    tar.extractall(tmpdir, filter="data")
-                scr_js_path = None
-                for root, _dirs, files in os.walk(tmpdir):
-                    for fname in files:
-                        if fname == "scr.js":
-                            scr_js_path = os.path.join(root, fname)
-                            break
-                    if scr_js_path:
-                        break
-                if not scr_js_path:
-                    raise RuntimeError(
-                        f"Build at {jenkins_url}: report.tar.gz downloaded but "
-                        f"no static/scr.js found inside."
+                    sys.exit(
+                        "❌ Jenkins authentication failed (redirect to login). "
+                        "Your JENKINS_TOKEN has likely expired."
                     )
-                with open(scr_js_path, "r", encoding="utf-8", errors="replace") as f:
-                    js = f.read()
+                _check_auth(resp)
+            if resp.status_code == 200:
+                print(f"    ✓ Downloaded ({len(resp.content):,} bytes)")
+                js = resp.text
+            elif is_default_host and resp.status_code in (301, 302, 303, 307, 308):
+                resp2 = sess.get(resp.headers.get("Location", pub_url), timeout=120)
+                _check_auth(resp2)
+                if resp2.status_code == 200:
+                    js = resp2.text
         except requests.exceptions.TooManyRedirects:
-            raise RuntimeError(
-                f"Build at {jenkins_url}: Jenkins redirect loop. "
-                f"The build may not exist or the test report was never generated."
-            )
+            pass
+
+        # Fall back to artifact
+        if js is None:
+            art_url = f"{job_base_url}/{build_number}/artifact/report/report.tar.gz"
+            print(f"  ↓ Trying artifact: {art_url}")
+            try:
+                resp = sess.get(art_url, timeout=60, stream=True, allow_redirects=not is_default_host)
+                if is_default_host:
+                    if _is_auth_redirect(resp):
+                        sys.exit("❌ Jenkins auth failed (redirect to login).")
+                    _check_auth(resp)
+                if is_default_host and resp.status_code in (301, 302, 303, 307, 308):
+                    resp = sess.get(resp.headers.get("Location", art_url), timeout=60, stream=True)
+                    _check_auth(resp)
+                if resp.status_code == 404:
+                    raise RuntimeError(
+                        f"Build at {jenkins_url}: Neither published report nor "
+                        f"artifact report.tar.gz found."
+                    )
+                resp.raise_for_status()
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tar_path = os.path.join(tmpdir, "report.tar.gz")
+                    with open(tar_path, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            f.write(chunk)
+                    with tarfile.open(tar_path, "r:gz") as tar:
+                        tar.extractall(tmpdir, filter="data")
+                    scr_js_path = None
+                    for root, _dirs, files in os.walk(tmpdir):
+                        for fname in files:
+                            if fname == "scr.js":
+                                scr_js_path = os.path.join(root, fname)
+                                break
+                        if scr_js_path:
+                            break
+                    if not scr_js_path:
+                        raise RuntimeError(
+                            f"Build at {jenkins_url}: report.tar.gz downloaded but "
+                            f"no static/scr.js found inside."
+                        )
+                    with open(scr_js_path, "r", encoding="utf-8", errors="replace") as f:
+                        js = f.read()
+            except requests.exceptions.TooManyRedirects:
+                raise RuntimeError(
+                    f"Build at {jenkins_url}: Jenkins redirect loop. "
+                    f"The build may not exist or the test report was never generated."
+                )
+        return js
+
+    js = _retry_transient(_attempt, what=f"build {build_number}")
 
     # Persist to cache
     SCRJS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
