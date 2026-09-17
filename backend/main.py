@@ -26,6 +26,7 @@ Device Logs endpoints:
   POST /device-logs/read      → read & filter logs by epoch time range
 """
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -560,57 +561,49 @@ async def test_report_summary(payload: TestReportRequest):
     session = _jenkins_session()
     use_cache_rc2 = not payload.force_refresh
 
-    # Track job base URLs for DAST count fetching
-    rc2_job_base: str | None = None
     # Labels used for display and cache keys
     rc1_label = payload.rc1.strip()
     rc2_label = payload.rc2.strip()
 
-    try:
-        # ── Fetch rc1 ──
-        if use_url_rc1:
-            rc1_js, rc1_job_base, rc1_build = fetch_report_js_from_url(
-                payload.rc1_url.strip(), session, use_cache=True,
-            )
-            rc1_label = rc1_label or rc1_build
-        else:
-            rc1_js = fetch_report_js(rc1_label, session, use_cache=True)
+    def _fetch_slot(use_url: bool, url: str, label: str, use_cache: bool) -> tuple[str, str | None, str]:
+        """Fetch one RC's scr.js, auto-retrying once on a Jenkins auth failure.
 
-        # ── Fetch rc2 ──
-        if use_url_rc2:
-            rc2_js, rc2_job_base, rc2_build = fetch_report_js_from_url(
-                payload.rc2_url.strip(), session, use_cache=use_cache_rc2,
-            )
-            rc2_label = rc2_label or rc2_build
-        else:
-            rc2_js = fetch_report_js(rc2_label, session, use_cache=use_cache_rc2)
-    except (SystemExit, Exception) as exc:
-        if _is_jenkins_auth_error(str(exc)):
+        Runs off the event loop (see asyncio.to_thread below) and owns its
+        own session handle so the two slots can download concurrently
+        instead of one after another.
+        """
+        sess = session
+        try:
+            if use_url:
+                js, job_base, build = fetch_report_js_from_url(url, sess, use_cache=True)
+                return js, job_base, label or build
+            js = fetch_report_js(label, sess, use_cache=use_cache)
+            return js, None, label
+        except (SystemExit, Exception) as exc:
+            if not _is_jenkins_auth_error(str(exc)):
+                raise
             logger.info("Jenkins auth failure in test-report-summary — refreshing token and retrying…")
             refresh = _refresh_jenkins_token()
-            if refresh["ok"]:
-                session = _jenkins_session()
-                try:
-                    if use_url_rc1:
-                        rc1_js, _, rc1_build = fetch_report_js_from_url(
-                            payload.rc1_url.strip(), session, use_cache=True,
-                        )
-                        rc1_label = rc1_label or rc1_build
-                    else:
-                        rc1_js = fetch_report_js(rc1_label, session, use_cache=True)
-                    if use_url_rc2:
-                        rc2_js, rc2_job_base, rc2_build = fetch_report_js_from_url(
-                            payload.rc2_url.strip(), session, use_cache=use_cache_rc2,
-                        )
-                        rc2_label = rc2_label or rc2_build
-                    else:
-                        rc2_js = fetch_report_js(rc2_label, session, use_cache=use_cache_rc2)
-                except (SystemExit, Exception) as exc2:
-                    raise HTTPException(status_code=500, detail=str(exc2))
-            else:
-                raise HTTPException(status_code=500, detail=str(exc))
-        else:
-            raise HTTPException(status_code=500, detail=str(exc))
+            if not refresh["ok"]:
+                raise
+            sess = _jenkins_session()
+            if use_url:
+                js, job_base, build = fetch_report_js_from_url(url, sess, use_cache=True)
+                return js, job_base, label or build
+            js = fetch_report_js(label, sess, use_cache=use_cache)
+            return js, None, label
+
+    try:
+        # Fetch both RCs concurrently — this is the "downloading" step that
+        # used to run rc1 then rc2 one after another (up to double the wait,
+        # and long enough on a cold cache for the browser/proxy to give up
+        # with "response ended prematurely").
+        (rc1_js, _rc1_job_base, rc1_label), (rc2_js, rc2_job_base, rc2_label) = await asyncio.gather(
+            asyncio.to_thread(_fetch_slot, use_url_rc1, payload.rc1_url.strip(), rc1_label, True),
+            asyncio.to_thread(_fetch_slot, use_url_rc2, payload.rc2_url.strip(), rc2_label, use_cache_rc2),
+        )
+    except (SystemExit, Exception) as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
     svc1, tc1_raw = parse_report_data(rc1_js)
     svc2, tc2_raw = parse_report_data(rc2_js)
@@ -1139,40 +1132,44 @@ async def test_case_confidence(payload: ConfidenceRequest):
         raise HTTPException(status_code=400, detail="At least 2 build numbers or URLs are required.")
 
     session = _jenkins_session()
-
-    # Fetch & parse every build (auto-retry once on Jenkins auth failure)
-    build_results: list[pd.DataFrame] = []
     items = build_urls if use_urls else builds
-    resolved_builds: list[str] = []
 
-    for item in items:
+    def _fetch_one(item: str) -> tuple[str, str]:
+        """Fetch scr.js for one build, auto-retrying once on Jenkins auth failure.
+
+        Runs off the event loop so all builds download concurrently instead
+        of one after another (see asyncio.gather below).
+        """
         label = item
         try:
             if use_urls:
                 js, _job_base, build_num = fetch_report_js_from_url(item, session, use_cache=True)
-                label = build_num
-            else:
-                build_num = item
-                js = fetch_report_js(build_num, session, use_cache=True)
+                return build_num, js
+            return item, fetch_report_js(item, session, use_cache=True)
         except (SystemExit, Exception) as exc:
-            if _is_jenkins_auth_error(str(exc)):
-                logger.info(f"Jenkins auth failure for {label} — refreshing token and retrying…")
-                refresh = _refresh_jenkins_token()
-                if refresh["ok"]:
-                    session = _jenkins_session()
-                    try:
-                        if use_urls:
-                            js, _job_base, build_num = fetch_report_js_from_url(item, session, use_cache=True)
-                            label = build_num
-                        else:
-                            js = fetch_report_js(item, session, use_cache=True)
-                            build_num = item
-                    except (SystemExit, Exception) as exc2:
-                        raise HTTPException(status_code=500, detail=f"Build {label}: {exc2}")
-                else:
-                    raise HTTPException(status_code=500, detail=f"Build {label}: {exc}")
-            else:
+            if not _is_jenkins_auth_error(str(exc)):
                 raise HTTPException(status_code=500, detail=f"Build {label}: {exc}")
+            logger.info(f"Jenkins auth failure for {label} — refreshing token and retrying…")
+            refresh = _refresh_jenkins_token()
+            if not refresh["ok"]:
+                raise HTTPException(status_code=500, detail=f"Build {label}: {exc}")
+            sess = _jenkins_session()
+            try:
+                if use_urls:
+                    js, _job_base, build_num = fetch_report_js_from_url(item, sess, use_cache=True)
+                    return build_num, js
+                return item, fetch_report_js(item, sess, use_cache=True)
+            except (SystemExit, Exception) as exc2:
+                raise HTTPException(status_code=500, detail=f"Build {label}: {exc2}")
+
+    # Fetch & parse every build (in parallel — this used to download builds
+    # one at a time, which multiplied the wait by the number of builds and
+    # was long enough on a cold cache to trip "response ended prematurely").
+    fetched = await asyncio.gather(*(asyncio.to_thread(_fetch_one, item) for item in items))
+
+    build_results: list[pd.DataFrame] = []
+    resolved_builds: list[str] = []
+    for build_num, js in fetched:
         _svc, tc_raw = parse_report_data(js)
         tc = aggregate_results(tc_raw)
         tc["TC_ID"] = tc["Testcase Name"].apply(extract_tc_id)
