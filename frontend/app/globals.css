@@ -1161,3 +1161,11 @@ html.light .sidebar-item-btn[data-active="true"] {
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
 }
+
+/* The native dropdown list inherits the text colour from its <select>, which
+   the filter pills hide with opacity — leaving white text on the browser's
+   white popup. Give the options their own background and colour. */
+.ds-pill-select { color-scheme: dark; }
+.ds-pill-select option { background: #14161f; color: #e5e7eb; }
+html.light .ds-pill-select { color-scheme: light; }
+html.light .ds-pill-select option { background: #ffffff; color: #111827; }

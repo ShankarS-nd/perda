@@ -50,8 +50,8 @@ interface SyncResult {
 interface Filters {
   q: string;
   suite: string;
-  product: string;
-  sku: string;
+  model: string;
+  region: string;
   dateFrom: string;
   dateTo: string;
   minPass: string;
@@ -61,12 +61,42 @@ interface Filters {
 
 interface FilterOptions {
   suites: string[];
-  products: string[];
-  skus: string[];
+}
+
+interface Choice {
+  value: string;
+  label: string;
+}
+
+/** Product categories are "<MODEL>_<REGION>", e.g. BAGHEERA3_NA. */
+const MODELS: Choice[] = [
+  { value: "BAGHEERA3", label: "D-450 · Bagheera3" },
+  { value: "BAGHEERA2", label: "D-430 · Bagheera2" },
+  { value: "KRAIT2", label: "D-215 · Krait2" },
+  { value: "KRAIT", label: "D-210 · Krait1" },
+];
+
+// Jenkins calls the US region "NA".
+const REGIONS: Choice[] = [
+  { value: "NA", label: "US" },
+  { value: "UK", label: "UK" },
+  { value: "IN", label: "IN" },
+];
+
+const labelFor = (choices: Choice[], value: string) =>
+  choices.find((c) => c.value === value)?.label ?? value;
+
+/** "BAGHEERA3_NA" → "D-450 · US" for the build row. */
+function describeProduct(product: string): string {
+  const i = product.lastIndexOf("_");
+  if (i < 0) return product;
+  const model = MODELS.find((m) => m.value === product.slice(0, i));
+  const region = labelFor(REGIONS, product.slice(i + 1));
+  return `${model ? model.label.split(" · ")[0] : product.slice(0, i)} · ${region}`;
 }
 
 const NO_FILTERS: Filters = {
-  q: "", suite: "", product: "", sku: "", dateFrom: "", dateTo: "",
+  q: "", suite: "", model: "", region: "", dateFrom: "", dateTo: "",
   minPass: "", maxPass: "", minUnknown: "",
 };
 
@@ -100,8 +130,8 @@ function filterParams(f: Filters): URLSearchParams {
   const p = new URLSearchParams();
   if (f.q.trim()) p.set("q", f.q.trim());
   if (f.suite) p.set("suite", f.suite);
-  if (f.product) p.set("product", f.product);
-  if (f.sku) p.set("sku", f.sku);
+  if (f.model) p.set("model", f.model);
+  if (f.region) p.set("region", f.region);
   if (f.dateFrom) p.set("date_from", f.dateFrom);
   if (f.dateTo) {
     const d = new Date(`${f.dateTo}T00:00:00Z`);
@@ -126,7 +156,7 @@ export default function BuildLog() {
   const [note, setNote] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const [options, setOptions] = useState<FilterOptions>({ suites: [], products: [], skus: [] });
+  const [options, setOptions] = useState<FilterOptions>({ suites: [] });
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -331,7 +361,9 @@ export default function BuildLog() {
                           <div className="text-[11px] text-gray-500 tabular-nums">
                             {fmtDate(b.built_at)} · {fmtDuration(b.duration_sec)}
                           </div>
-                          {b.suite && <div className="text-[11px] text-gray-600">{b.suite}</div>}
+                          <div className="text-[11px] text-gray-600">
+                            {[b.product && describeProduct(b.product), b.suite].filter(Boolean).join(" · ")}
+                          </div>
                         </td>
                         <td className="font-mono text-xs text-gray-300">
                           {b.packages.length === 0 ? "—" : b.packages.map((p) => <div key={p}>{p}</div>)}
@@ -490,8 +522,8 @@ function FilterBar({
   const chips: { key: string; label: string; clear: Partial<Filters> }[] = [];
   if (filters.q.trim()) chips.push({ key: "q", label: `“${filters.q.trim()}”`, clear: { q: "" } });
   if (filters.suite) chips.push({ key: "suite", label: `Suite: ${filters.suite}`, clear: { suite: "" } });
-  if (filters.product) chips.push({ key: "product", label: `Product: ${filters.product}`, clear: { product: "" } });
-  if (filters.sku) chips.push({ key: "sku", label: `SKU: ${filters.sku}`, clear: { sku: "" } });
+  if (filters.model) chips.push({ key: "model", label: `Device: ${labelFor(MODELS, filters.model)}`, clear: { model: "" } });
+  if (filters.region) chips.push({ key: "region", label: `Region: ${labelFor(REGIONS, filters.region)}`, clear: { region: "" } });
   if (filters.dateFrom || filters.dateTo) {
     const label = presetDays !== undefined && presetDays !== null
       ? (presetDays === 0 ? "Today" : `Last ${presetDays} days`)
@@ -533,9 +565,13 @@ function FilterBar({
           )}
         </div>
 
-        <PillSelect label="Suite" value={filters.suite} options={options.suites} onChange={(v) => onChange("suite", v)} />
-        <PillSelect label="Product" value={filters.product} options={options.products} onChange={(v) => onChange("product", v)} />
-        <PillSelect label="Device" value={filters.sku} options={options.skus} onChange={(v) => onChange("sku", v)} />
+        <PillSelect label="Device" value={filters.model} options={MODELS} onChange={(v) => onChange("model", v)} />
+        <PillSelect label="Region" value={filters.region} options={REGIONS} onChange={(v) => onChange("region", v)} />
+        <PillSelect
+          label="Suite" value={filters.suite}
+          options={options.suites.map((x) => ({ value: x, label: x }))}
+          onChange={(v) => onChange("suite", v)}
+        />
       </div>
 
       {/* Row 2 — date range + health slices */}
@@ -653,7 +689,7 @@ function FilterBar({
     keyboard, mobile pickers and screen readers all keep working. */
 function PillSelect({
   label, value, options, onChange,
-}: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
+}: { label: string; value: string; options: Choice[]; onChange: (v: string) => void }) {
   const on = value !== "";
   return (
     <label
@@ -664,7 +700,7 @@ function PillSelect({
       }`}
     >
       <span className={on ? "text-indigo-300/70" : "text-gray-600"}>{label}</span>
-      <span className="font-medium">{on ? value : "Any"}</span>
+      <span className="font-medium">{on ? labelFor(options, value) : "Any"}</span>
       <svg className="h-3.5 w-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
       </svg>
@@ -672,10 +708,10 @@ function PillSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label={label}
-        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        className="ds-pill-select absolute inset-0 h-full w-full cursor-pointer opacity-0"
       >
         <option value="">Any</option>
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </label>
   );

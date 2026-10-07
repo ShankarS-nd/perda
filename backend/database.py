@@ -33,7 +33,7 @@ Provides:
   Build log (one row per successful Test_Automation_Parallel build):
   save_logged_build()               → insert / refresh a build's results
   get_logged_builds()               → a filtered page of builds, newest first
-  get_build_filter_options()        → distinct suites / products / SKUs for the filters
+  get_build_filter_options()        → distinct suites for the filter
   get_logged_build_numbers()        → build numbers already logged
   get_logged_builds_needing_retry() → logged builds still missing known/unknown counts
 """
@@ -858,13 +858,17 @@ def _build_filter_sql(f: dict[str, Any]) -> tuple[str, list[Any]]:
         like = f"%{q}%"
         where.append("(CAST(build_number AS TEXT) LIKE ? OR packages_json LIKE ?)")
         args += [like, like]
-    for col in ("suite", "product"):
-        if f.get(col):
-            where.append(f"{col} = ?")
-            args.append(f[col])
-    if f.get("sku"):
-        where.append("devices_json LIKE ?")
-        args.append(f'%"sku": {json.dumps(f["sku"])}%')
+    if f.get("suite"):
+        where.append("suite = ?")
+        args.append(f["suite"])
+    # Product categories look like BAGHEERA3_NA: <model>_<region>. The model
+    # match keeps the underscore so KRAIT does not also catch KRAIT2.
+    if f.get("model"):
+        where.append("product LIKE ? ESCAPE '\\'")
+        args.append(f["model"].replace("_", "\\_") + "\\_%")
+    if f.get("region"):
+        where.append("product LIKE ? ESCAPE '\\'")
+        args.append("%\\_" + f["region"].replace("_", "\\_"))
     if f.get("date_from"):
         where.append("built_at >= ?")
         args.append(f["date_from"])
@@ -906,15 +910,11 @@ def get_logged_builds(
 
 
 def get_build_filter_options() -> dict[str, list[str]]:
-    """Distinct values to offer in the filter dropdowns."""
+    """Distinct suites to offer in the filter dropdown."""
     conn = _connect()
     try:
         suites = [r[0] for r in conn.execute("SELECT DISTINCT suite FROM build_log WHERE suite != '' ORDER BY suite")]
-        products = [r[0] for r in conn.execute("SELECT DISTINCT product FROM build_log WHERE product != '' ORDER BY product")]
-        skus: set[str] = set()
-        for (dj,) in conn.execute("SELECT devices_json FROM build_log"):
-            skus.update(d.get("sku", "") for d in json.loads(dj or "[]"))
-        return {"suites": suites, "products": products, "skus": sorted(s for s in skus if s)}
+        return {"suites": suites}
     finally:
         conn.close()
 

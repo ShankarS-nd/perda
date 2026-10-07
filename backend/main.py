@@ -387,8 +387,8 @@ async def build_log_list(
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, description="Build number or package substring"),
     suite: str | None = None,
-    product: str | None = None,
-    sku: str | None = Query(None, description="Only builds that ran a device of this SKU"),
+    model: str | None = Query(None, description="Product model prefix, e.g. BAGHEERA3 or KRAIT"),
+    region: str | None = Query(None, description="Product region suffix: NA (US), UK or IN"),
     date_from: str | None = Query(None, description="ISO date, inclusive"),
     date_to: str | None = Query(None, description="ISO date, exclusive"),
     min_pass: float | None = None,
@@ -398,7 +398,7 @@ async def build_log_list(
     max_unknown: float | None = None,
 ):
     filters = {
-        "q": q, "suite": suite, "product": product, "sku": sku,
+        "q": q, "suite": suite, "model": model, "region": region,
         "date_from": date_from, "date_to": date_to,
         "min_pass": min_pass, "max_pass": max_pass,
         "min_known": min_known, "min_unknown": min_unknown, "max_unknown": max_unknown,
