@@ -20,6 +20,10 @@ Workflow endpoints:
 Test Report Summary endpoint:
   POST /test-report-summary   → return dashboard data for two builds
 
+Build Log endpoints:
+  GET  /build-log             → every logged successful build, newest first
+  POST /build-log/sync        → pull any new successful builds from Jenkins now
+
 Device Logs endpoints:
   POST /device-logs/download  → run logs_download.py via SSE stream
   GET  /device-logs/files     → list processed log service files for device+date
@@ -137,6 +141,7 @@ from database import (
     delete_review_testcase,
     save_review_run,
     get_review_runs,
+    get_logged_builds,
 )
 from workflow_engine import run_workflow
 
@@ -339,6 +344,53 @@ async def jenkins_token_refresh():
     """Manually trigger a Jenkins token refresh by hitting the security page."""
     result = _refresh_jenkins_token()
     return result
+
+
+# ---------------------------------------------------------------------------
+# Build log — results of every successful Test_Automation_Parallel build
+# ---------------------------------------------------------------------------
+
+BUILD_LOG_POLL_SEC = int(os.getenv("PERDA_BUILD_LOG_POLL_SEC", "600"))
+
+
+def _sync_build_log(lookback: int) -> dict:
+    from scripts.rc_comparison import _jenkins_session
+    import build_log
+
+    return build_log.sync_builds(
+        _jenkins_session,
+        refresh_auth=lambda: _refresh_jenkins_token()["ok"],
+        lookback=lookback,
+    )
+
+
+async def _build_log_poller() -> None:
+    """Log newly finished builds for as long as the backend is up."""
+    while True:
+        try:
+            await asyncio.to_thread(_sync_build_log, 30)
+        except Exception as exc:  # keep polling through Jenkins outages
+            logger.warning(f"build-log poll failed: {exc}")
+        await asyncio.sleep(BUILD_LOG_POLL_SEC)
+
+
+@app.on_event("startup")
+async def _start_build_log_poller() -> None:
+    app.state.build_log_task = asyncio.create_task(_build_log_poller())
+
+
+@app.get("/build-log")
+async def build_log_list(limit: int = Query(100, ge=1, le=500)):
+    return {"builds": get_logged_builds(limit), "poll_interval_sec": BUILD_LOG_POLL_SEC}
+
+
+@app.post("/build-log/sync")
+async def build_log_sync(lookback: int = Query(30, ge=1, le=200)):
+    """Check Jenkins right now instead of waiting for the next poll."""
+    try:
+        return await asyncio.to_thread(_sync_build_log, lookback)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Build log sync failed: {exc}")
 
 
 @app.post("/run-script")

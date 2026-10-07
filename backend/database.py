@@ -29,6 +29,12 @@ Provides:
   delete_review_comment()    → remove a comment
   save_review_run()          → record an execution of a testcase on a device
   get_review_runs()          → runs for a testcase, newest first
+
+  Build log (one row per successful Test_Automation_Parallel build):
+  save_logged_build()               → insert / refresh a build's results
+  get_logged_builds()               → newest builds first, devices expanded
+  get_logged_build_numbers()        → build numbers already logged
+  get_logged_builds_needing_retry() → logged builds still missing known/unknown counts
 """
 
 from __future__ import annotations
@@ -180,6 +186,32 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_review_runs_tc
                 ON review_runs(testcase_id);
+
+            -- One row per successful Jenkins build of Test_Automation_Parallel.
+            -- Counts are summed across devices; percentages are over applicable
+            -- tests (pass + fail + not-executed). known/unknown are NULL until
+            -- the DAST pages could be read, and are re-fetched on a later sync.
+            CREATE TABLE IF NOT EXISTS build_log (
+                build_number  INTEGER  PRIMARY KEY,
+                built_at      TEXT     NOT NULL DEFAULT '',
+                duration_sec  INTEGER  NOT NULL DEFAULT 0,
+                suite         TEXT     NOT NULL DEFAULT '',
+                product       TEXT     NOT NULL DEFAULT '',
+                packages_json TEXT     NOT NULL DEFAULT '[]',
+                devices_json  TEXT     NOT NULL DEFAULT '[]',
+                pass_count    INTEGER  NOT NULL DEFAULT 0,
+                fail_count    INTEGER  NOT NULL DEFAULT 0,
+                ne_count      INTEGER  NOT NULL DEFAULT 0,
+                na_count      INTEGER  NOT NULL DEFAULT 0,
+                known_count   INTEGER,
+                unknown_count INTEGER,
+                pass_pct      REAL     NOT NULL DEFAULT 0,
+                known_pct     REAL,
+                unknown_pct   REAL,
+                build_url     TEXT     NOT NULL DEFAULT '',
+                report_url    TEXT     NOT NULL DEFAULT '',
+                logged_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
         """)
 
         # CREATE TABLE IF NOT EXISTS leaves an already-created table alone, so a
@@ -768,5 +800,89 @@ def get_review_runs(tc_key: str | None = None, limit: int = 20) -> list[dict[str
             d["steps"] = json.loads(d.pop("steps_json") or "[]")
             out.append(d)
         return out
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Build log
+# ---------------------------------------------------------------------------
+
+
+def save_logged_build(rec: dict[str, Any]) -> None:
+    """Insert a build's results, or refresh them if the build is already logged."""
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO build_log
+                (build_number, built_at, duration_sec, suite, product,
+                 packages_json, devices_json, pass_count, fail_count, ne_count,
+                 na_count, known_count, unknown_count, pass_pct, known_pct,
+                 unknown_pct, build_url, report_url, logged_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(build_number) DO UPDATE SET
+                built_at=excluded.built_at, duration_sec=excluded.duration_sec,
+                suite=excluded.suite, product=excluded.product,
+                packages_json=excluded.packages_json, devices_json=excluded.devices_json,
+                pass_count=excluded.pass_count, fail_count=excluded.fail_count,
+                ne_count=excluded.ne_count, na_count=excluded.na_count,
+                known_count=excluded.known_count, unknown_count=excluded.unknown_count,
+                pass_pct=excluded.pass_pct, known_pct=excluded.known_pct,
+                unknown_pct=excluded.unknown_pct, build_url=excluded.build_url,
+                report_url=excluded.report_url
+            """,
+            (
+                rec["build_number"], rec["built_at"], rec["duration_sec"],
+                rec["suite"], rec["product"],
+                json.dumps(rec["packages"]), json.dumps(rec["devices"]),
+                rec["pass_count"], rec["fail_count"], rec["ne_count"], rec["na_count"],
+                rec["known_count"], rec["unknown_count"],
+                rec["pass_pct"], rec["known_pct"], rec["unknown_pct"],
+                rec["build_url"], rec["report_url"],
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_logged_builds(limit: int = 100) -> list[dict[str, Any]]:
+    """Logged builds, newest first, with packages and devices decoded."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM build_log ORDER BY build_number DESC LIMIT ?", (limit,)
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["packages"] = json.loads(d.pop("packages_json") or "[]")
+            d["devices"] = json.loads(d.pop("devices_json") or "[]")
+            out.append(d)
+        return out
+    finally:
+        conn.close()
+
+
+def get_logged_build_numbers() -> set[int]:
+    conn = _connect()
+    try:
+        return {r[0] for r in conn.execute("SELECT build_number FROM build_log")}
+    finally:
+        conn.close()
+
+
+def get_logged_builds_needing_retry() -> list[int]:
+    """Builds logged before their DAST known/unknown pages were readable."""
+    conn = _connect()
+    try:
+        return [
+            r[0] for r in conn.execute(
+                "SELECT build_number FROM build_log "
+                "WHERE known_count IS NULL OR unknown_count IS NULL"
+            )
+        ]
     finally:
         conn.close()

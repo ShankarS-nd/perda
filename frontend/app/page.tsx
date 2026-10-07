@@ -10,6 +10,7 @@ import TestReportDashboard from "@/components/TestReportDashboard";
 import ConfidenceDashboard from "@/components/ConfidenceDashboard";
 import TCAnalysis from "@/components/TCAnalysis";
 import ReviewBench from "@/components/ReviewBench";
+import BuildLog from "@/components/BuildLog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +40,7 @@ type Page =
   | "tc-analysis"
   | "review-bench"
   | "history"
+  | "build-log"
   | "workflows"
   | "workflow-runs";
 
@@ -68,6 +70,8 @@ const PAGE_META: PageMeta[] = [
   { key: "history", label: "History", description: "Past script executions and their logs", shortcut: "6", icon: HistoryIcon, section: "Core" },
   { key: "workflows", label: "Workflow Builder", description: "Compose multi-step automations", shortcut: "6", icon: WorkflowIcon, section: "Workflows" },
   { key: "workflow-runs", label: "Workflow Runs", description: "Executions of saved workflows", shortcut: "7", icon: WorkflowRunsIcon, section: "Workflows" },
+  // Last so the Alt+number order of the pages above stays as it was.
+  { key: "build-log", label: "Build Log", description: "Results of every successful Test_Automation_Parallel build", icon: BuildLogIcon, section: "Core" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -448,6 +452,15 @@ export default function Home() {
             shortcut="⌥6"
           />
 
+          {/* Build Log */}
+          <SidebarItem
+            label="Build Log"
+            icon={<BuildLogIcon />}
+            active={activePage === "build-log"}
+            onClick={() => navigateTo("build-log")}
+            collapsed={sidebarCollapsed}
+          />
+
           {/* Workflows section */}
           <div className="pt-4 mt-3 border-t border-white/[0.04]">
             {!sidebarCollapsed && (
@@ -660,6 +673,7 @@ export default function Home() {
                 {activePage === "tc-analysis" && <TCAnalysis />}
                 {activePage === "review-bench" && <ReviewBench />}
                 {activePage === "history" && <RunHistory />}
+                {activePage === "build-log" && <BuildLog />}
                 {activePage === "workflows" && <WorkflowBuilder />}
                 {activePage === "workflow-runs" && <WorkflowExecution />}
               </motion.div>
@@ -1182,6 +1196,24 @@ function TCAnalysisIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
+      />
+    </svg>
+  );
+}
+
+function BuildLogIcon() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6"
       />
     </svg>
   );
