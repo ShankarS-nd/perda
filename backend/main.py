@@ -21,7 +21,8 @@ Test Report Summary endpoint:
   POST /test-report-summary   → return dashboard data for two builds
 
 Build Log endpoints:
-  GET  /build-log             → every logged successful build, newest first
+  GET  /build-log             → logged successful builds, newest first (paged, filterable)
+  GET  /build-log/filter-options → values for the filter dropdowns
   POST /build-log/sync        → pull any new successful builds from Jenkins now
 
 Device Logs endpoints:
@@ -142,6 +143,7 @@ from database import (
     save_review_run,
     get_review_runs,
     get_logged_builds,
+    get_build_filter_options,
 )
 from workflow_engine import run_workflow
 
@@ -380,8 +382,34 @@ async def _start_build_log_poller() -> None:
 
 
 @app.get("/build-log")
-async def build_log_list(limit: int = Query(100, ge=1, le=500)):
-    return {"builds": get_logged_builds(limit), "poll_interval_sec": BUILD_LOG_POLL_SEC}
+async def build_log_list(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    q: str | None = Query(None, description="Build number or package substring"),
+    suite: str | None = None,
+    product: str | None = None,
+    sku: str | None = Query(None, description="Only builds that ran a device of this SKU"),
+    date_from: str | None = Query(None, description="ISO date, inclusive"),
+    date_to: str | None = Query(None, description="ISO date, exclusive"),
+    min_pass: float | None = None,
+    max_pass: float | None = None,
+    min_known: float | None = None,
+    min_unknown: float | None = None,
+    max_unknown: float | None = None,
+):
+    filters = {
+        "q": q, "suite": suite, "product": product, "sku": sku,
+        "date_from": date_from, "date_to": date_to,
+        "min_pass": min_pass, "max_pass": max_pass,
+        "min_known": min_known, "min_unknown": min_unknown, "max_unknown": max_unknown,
+    }
+    builds, total = get_logged_builds(limit, offset, filters)
+    return {"builds": builds, "total": total, "poll_interval_sec": BUILD_LOG_POLL_SEC}
+
+
+@app.get("/build-log/filter-options")
+async def build_log_filter_options():
+    return get_build_filter_options()
 
 
 @app.post("/build-log/sync")

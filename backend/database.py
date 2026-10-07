@@ -32,7 +32,8 @@ Provides:
 
   Build log (one row per successful Test_Automation_Parallel build):
   save_logged_build()               → insert / refresh a build's results
-  get_logged_builds()               → newest builds first, devices expanded
+  get_logged_builds()               → a filtered page of builds, newest first
+  get_build_filter_options()        → distinct suites / products / SKUs for the filters
   get_logged_build_numbers()        → build numbers already logged
   get_logged_builds_needing_retry() → logged builds still missing known/unknown counts
 """
@@ -848,12 +849,50 @@ def save_logged_build(rec: dict[str, Any]) -> None:
         conn.close()
 
 
-def get_logged_builds(limit: int = 100) -> list[dict[str, Any]]:
-    """Logged builds, newest first, with packages and devices decoded."""
+def _build_filter_sql(f: dict[str, Any]) -> tuple[str, list[Any]]:
+    """WHERE clause for the build-log filters (all optional, ANDed together)."""
+    where: list[str] = []
+    args: list[Any] = []
+    q = (f.get("q") or "").strip()
+    if q:
+        like = f"%{q}%"
+        where.append("(CAST(build_number AS TEXT) LIKE ? OR packages_json LIKE ?)")
+        args += [like, like]
+    for col in ("suite", "product"):
+        if f.get(col):
+            where.append(f"{col} = ?")
+            args.append(f[col])
+    if f.get("sku"):
+        where.append("devices_json LIKE ?")
+        args.append(f'%"sku": {json.dumps(f["sku"])}%')
+    if f.get("date_from"):
+        where.append("built_at >= ?")
+        args.append(f["date_from"])
+    if f.get("date_to"):
+        where.append("built_at < ?")
+        args.append(f["date_to"])
+    for key, col, op in (
+        ("min_pass", "pass_pct", ">="), ("max_pass", "pass_pct", "<="),
+        ("min_known", "known_pct", ">="), ("min_unknown", "unknown_pct", ">="),
+        ("max_unknown", "unknown_pct", "<="),
+    ):
+        if f.get(key) is not None:
+            where.append(f"{col} {op} ?")
+            args.append(f[key])
+    return (" WHERE " + " AND ".join(where)) if where else "", args
+
+
+def get_logged_builds(
+    limit: int = 50, offset: int = 0, filters: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """One page of logged builds, newest first, plus the total matching the filters."""
+    clause, args = _build_filter_sql(filters or {})
     conn = _connect()
     try:
+        total = conn.execute(f"SELECT COUNT(*) FROM build_log{clause}", args).fetchone()[0]
         rows = conn.execute(
-            "SELECT * FROM build_log ORDER BY build_number DESC LIMIT ?", (limit,)
+            f"SELECT * FROM build_log{clause} ORDER BY build_number DESC LIMIT ? OFFSET ?",
+            [*args, limit, offset],
         ).fetchall()
         out = []
         for r in rows:
@@ -861,7 +900,21 @@ def get_logged_builds(limit: int = 100) -> list[dict[str, Any]]:
             d["packages"] = json.loads(d.pop("packages_json") or "[]")
             d["devices"] = json.loads(d.pop("devices_json") or "[]")
             out.append(d)
-        return out
+        return out, total
+    finally:
+        conn.close()
+
+
+def get_build_filter_options() -> dict[str, list[str]]:
+    """Distinct values to offer in the filter dropdowns."""
+    conn = _connect()
+    try:
+        suites = [r[0] for r in conn.execute("SELECT DISTINCT suite FROM build_log WHERE suite != '' ORDER BY suite")]
+        products = [r[0] for r in conn.execute("SELECT DISTINCT product FROM build_log WHERE product != '' ORDER BY product")]
+        skus: set[str] = set()
+        for (dj,) in conn.execute("SELECT devices_json FROM build_log"):
+            skus.update(d.get("sku", "") for d in json.loads(dj or "[]"))
+        return {"suites": suites, "products": products, "skus": sorted(s for s in skus if s)}
     finally:
         conn.close()
 
