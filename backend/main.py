@@ -23,7 +23,8 @@ Test Report Summary endpoint:
 Build Log endpoints:
   GET  /build-log             → logged successful builds, newest first (paged, filterable)
   GET  /build-log/filter-options → values for the filter dropdowns
-  POST /build-log/sync        → pull any new successful builds from Jenkins now
+  POST /build-log/sync        → pull new successful builds from Jenkins now (?full=true backfills all history)
+  GET  /build-log/sync-status → progress of the sync in flight
 
 Device Logs endpoints:
   POST /device-logs/download  → run logs_download.py via SSE stream
@@ -355,7 +356,7 @@ async def jenkins_token_refresh():
 BUILD_LOG_POLL_SEC = int(os.getenv("PERDA_BUILD_LOG_POLL_SEC", "600"))
 
 
-def _sync_build_log(lookback: int) -> dict:
+def _sync_build_log(lookback: int | None) -> dict:
     from scripts.rc_comparison import _jenkins_session
     import build_log
 
@@ -367,10 +368,16 @@ def _sync_build_log(lookback: int) -> dict:
 
 
 async def _build_log_poller() -> None:
-    """Log newly finished builds for as long as the backend is up."""
+    """Log newly finished builds for as long as the backend is up.
+
+    The first pass covers every build Jenkins still has, so history is filled in
+    after a fresh start; later passes only look at the newest few.
+    """
+    lookback: int | None = None
     while True:
         try:
-            await asyncio.to_thread(_sync_build_log, 30)
+            await asyncio.to_thread(_sync_build_log, lookback)
+            lookback = 30
         except Exception as exc:  # keep polling through Jenkins outages
             logger.warning(f"build-log poll failed: {exc}")
         await asyncio.sleep(BUILD_LOG_POLL_SEC)
@@ -413,12 +420,40 @@ async def build_log_filter_options():
 
 
 @app.post("/build-log/sync")
-async def build_log_sync(lookback: int = Query(30, ge=1, le=200)):
-    """Check Jenkins right now instead of waiting for the next poll."""
+async def build_log_sync(
+    lookback: int = Query(30, ge=1, le=1000),
+    full: bool = Query(False, description="Backfill every build Jenkins still has, in the background"),
+):
+    """Check Jenkins right now instead of waiting for the next poll.
+
+    A normal check runs to completion. A full backfill takes minutes, so it
+    runs in the background — follow it with GET /build-log/sync-status.
+    """
+    import build_log
+
+    if full:
+        if build_log.get_sync_status()["running"]:
+            return {"ok": True, "busy": True, "started": False}
+
+        async def _run() -> None:
+            try:
+                await asyncio.to_thread(_sync_build_log, None)
+            except Exception as exc:
+                logger.warning(f"build-log full backfill failed: {exc}")
+
+        app.state.build_log_backfill = asyncio.create_task(_run())
+        return {"ok": True, "busy": False, "started": True}
     try:
         return await asyncio.to_thread(_sync_build_log, lookback)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Build log sync failed: {exc}")
+
+
+@app.get("/build-log/sync-status")
+async def build_log_sync_status():
+    import build_log
+
+    return build_log.get_sync_status()
 
 
 @app.post("/run-script")

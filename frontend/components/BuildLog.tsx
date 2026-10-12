@@ -47,6 +47,13 @@ interface SyncResult {
   updated: number[];
 }
 
+interface SyncStatus {
+  running: boolean;
+  done: number;
+  todo: number;
+  full: boolean;
+}
+
 interface Filters {
   q: string;
   suite: string;
@@ -159,6 +166,7 @@ export default function BuildLog() {
   const [options, setOptions] = useState<FilterOptions>({ suites: [] });
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [status, setStatus] = useState<SyncStatus>({ running: false, done: 0, todo: 0, full: false });
 
   const activeCount = useMemo(
     () => Object.values(filters).filter((v) => v !== "").length,
@@ -231,6 +239,43 @@ export default function BuildLog() {
     return () => clearInterval(t);
   }, [load]);
 
+  // Follow a sync that is running on the backend — the full-history backfill
+  // takes minutes, and the backend also starts one itself after a restart. The
+  // list refreshes as builds land, and once more when it finishes.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    let stop = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/build-log/sync-status`);
+        if (!res.ok || stop) return;
+        const st: SyncStatus = await res.json();
+        setStatus(st);
+        if (st.running || wasRunning.current) {
+          load(filtersRef.current, loadedRef.current);
+        }
+        wasRunning.current = st.running;
+      } catch { /* status is a nicety; the list still works */ }
+    };
+    tick();
+    const t = setInterval(tick, 4000);
+    return () => { stop = true; clearInterval(t); };
+  }, [load]);
+
+  const loadFullHistory = async () => {
+    setNote(null);
+    try {
+      const res = await fetch(`${API_BASE}/build-log/sync?full=true`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const r = await res.json();
+      setNote(r.started ? null : "A sync is already running.");
+      setStatus((prev) => ({ ...prev, running: true, full: true }));
+      wasRunning.current = true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the backfill");
+    }
+  };
+
   const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
@@ -267,9 +312,25 @@ export default function BuildLog() {
 
   return (
     <div className="w-full space-y-6">
-      <div className="flex items-center justify-end gap-3">
-        {note && <span className="text-xs text-gray-500">{note}</span>}
-        <button onClick={syncNow} disabled={syncing} className="ds-btn-secondary">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {status.running ? (
+          <span className="flex items-center gap-2 text-xs text-gray-400">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+            {status.full ? "Loading full history" : "Syncing"}
+            {status.todo > 0 && ` · ${status.done} of ${status.todo} builds`}
+          </span>
+        ) : (
+          note && <span className="text-xs text-gray-500">{note}</span>
+        )}
+        <button
+          onClick={loadFullHistory}
+          disabled={status.running}
+          title="Fetch every build Jenkins still keeps, not just the newest 30"
+          className="ds-btn-secondary"
+        >
+          Load full history
+        </button>
+        <button onClick={syncNow} disabled={syncing || status.running} className="ds-btn-secondary">
           <svg
             className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}

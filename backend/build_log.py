@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -32,8 +33,23 @@ JENKINS_JOB_URL = (
 )
 REQUEST_TIMEOUT = 30
 DEFAULT_LOOKBACK = 30
+FETCH_WORKERS = 4  # builds fetched in parallel — enough to be quick, gentle on Jenkins
 
 _sync_lock = threading.Lock()
+
+# Progress of the sync in flight, for the UI. Guarded by _progress_lock.
+_progress_lock = threading.Lock()
+_progress: dict[str, Any] = {"running": False, "done": 0, "todo": 0, "full": False}
+
+
+def get_sync_status() -> dict[str, Any]:
+    with _progress_lock:
+        return dict(_progress)
+
+
+def _set_progress(**kw: Any) -> None:
+    with _progress_lock:
+        _progress.update(kw)
 
 
 class JenkinsAuthError(RuntimeError):
@@ -162,56 +178,85 @@ def fetch_build_record(
 def sync_builds(
     session_factory: Callable[[], requests.Session],
     refresh_auth: Callable[[], bool] | None = None,
-    lookback: int = DEFAULT_LOOKBACK,
+    lookback: int | None = DEFAULT_LOOKBACK,
 ) -> dict[str, Any]:
     """Log any SUCCESS build among the newest `lookback` that isn't logged yet.
 
-    Blocking — call from a worker thread. Rows logged earlier without known /
-    unknown counts (DAST pages not ready yet) are re-fetched too. Returns a
-    summary; raises JenkinsAuthError if the token is bad even after refresh_auth.
+    lookback=None means every build Jenkins still has. Blocking — call from a
+    worker thread. Rows logged earlier without known / unknown counts (DAST
+    pages not ready yet) are re-fetched too. Returns a summary; raises
+    JenkinsAuthError if the token is bad even after refresh_auth.
     """
     if not _sync_lock.acquire(blocking=False):
         return {"ok": True, "busy": True, "added": [], "updated": [], "skipped": []}
+    _set_progress(running=True, done=0, todo=0, full=lookback is None)
     try:
         try:
-            return _sync(session_factory(), lookback)
+            return _sync(session_factory, lookback)
         except JenkinsAuthError:
             if not refresh_auth or not refresh_auth():
                 raise
-            return _sync(session_factory(), lookback)
+            return _sync(session_factory, lookback)
     finally:
+        _set_progress(running=False)
         _sync_lock.release()
 
 
-def _sync(session: requests.Session, lookback: int) -> dict[str, Any]:
-    resp = _get(
-        session,
-        f"{JENKINS_JOB_URL}/api/json",
-        params={"tree": f"builds[number,result,building]{{0,{int(lookback)}}}"},
-    )
+def _sync(session_factory: Callable[[], requests.Session], lookback: int | None) -> dict[str, Any]:
+    session = session_factory()
+    if lookback is None:
+        tree = "allBuilds[number,result,building]"
+    else:
+        tree = f"builds[number,result,building]{{0,{int(lookback)}}}"
+    resp = _get(session, f"{JENKINS_JOB_URL}/api/json", params={"tree": tree})
     resp.raise_for_status()
-    successful = sorted(
-        (b["number"] for b in resp.json().get("builds", []) if b.get("result") == "SUCCESS"),
-    )
+    data = resp.json()
+    builds = data.get("allBuilds") if lookback is None else data.get("builds")
+    successful = sorted(b["number"] for b in builds or [] if b.get("result") == "SUCCESS")
     have = get_logged_build_numbers()
     retry = set(get_logged_builds_needing_retry())
-    todo = [n for n in successful if n not in have or n in retry]
+    # Newest first, so the page fills from the top while a long backfill runs.
+    todo = sorted((n for n in successful if n not in have or n in retry), reverse=True)
+    _set_progress(todo=len(todo), done=0)
 
     added: list[int] = []
     updated: list[int] = []
     skipped: list[int] = []
-    for n in todo:
-        detail = _get(
-            session,
-            f"{JENKINS_JOB_URL}/{n}/api/json",
-            params={"tree": "timestamp,duration,actions[parameters[name,value]]"},
-        )
-        detail.raise_for_status()
-        record = fetch_build_record(session, n, detail.json())
-        if record is None:
-            skipped.append(n)
-            continue
-        save_logged_build(record)
-        (updated if n in have else added).append(n)
-        logger.info(f"build-log: logged #{n} (pass {record['pass_pct']}%)")
-    return {"ok": True, "busy": False, "added": added, "updated": updated, "skipped": skipped}
+    errors: list[int] = []
+    auth_error: list[JenkinsAuthError] = []
+
+    def one(n: int) -> None:
+        if auth_error:
+            return
+        sess = session_factory()  # a session per worker; they aren't guaranteed thread-safe
+        try:
+            detail = _get(
+                sess, f"{JENKINS_JOB_URL}/{n}/api/json",
+                params={"tree": "timestamp,duration,actions[parameters[name,value]]"},
+            )
+            detail.raise_for_status()
+            record = fetch_build_record(sess, n, detail.json())
+            if record is None:
+                skipped.append(n)
+                return
+            save_logged_build(record)
+            (updated if n in have else added).append(n)
+            logger.info(f"build-log: logged #{n} (pass {record['pass_pct']}%)")
+        except JenkinsAuthError as exc:
+            auth_error.append(exc)
+        except Exception as exc:  # one bad build must not sink the rest
+            logger.warning(f"build-log: #{n} failed: {exc}")
+            errors.append(n)
+        finally:
+            with _progress_lock:
+                _progress["done"] += 1
+
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+        list(pool.map(one, todo))
+    if auth_error:
+        raise auth_error[0]
+    return {
+        "ok": True, "busy": False,
+        "added": sorted(added), "updated": sorted(updated),
+        "skipped": sorted(skipped), "errors": sorted(errors),
+    }
