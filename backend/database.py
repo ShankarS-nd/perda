@@ -188,7 +188,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_review_runs_tc
                 ON review_runs(testcase_id);
 
-            -- One row per successful Jenkins build of Test_Automation_Parallel.
+            -- One row per successful Jenkins build of Test_Automation_Parallel_v2.
             -- Counts are summed across devices; percentages are over applicable
             -- tests (pass + fail + not-executed). known/unknown are NULL until
             -- the DAST pages could be read, and are re-fetched on a later sync.
@@ -895,7 +895,7 @@ def get_logged_builds(
     try:
         total = conn.execute(f"SELECT COUNT(*) FROM build_log{clause}", args).fetchone()[0]
         rows = conn.execute(
-            f"SELECT * FROM build_log{clause} ORDER BY build_number DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM build_log{clause} ORDER BY built_at DESC, build_number DESC LIMIT ? OFFSET ?",
             [*args, limit, offset],
         ).fetchall()
         out = []

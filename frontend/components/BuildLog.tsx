@@ -384,7 +384,7 @@ export default function BuildLog() {
             <div className="ds-empty">
               <p className="text-[15px] font-medium text-gray-400 mb-1">No builds logged yet</p>
               <p className="text-sm text-gray-600 max-w-sm">
-                Successful Test_Automation_Parallel builds are logged automatically.
+                Successful Test_Automation_Parallel_v2 builds are logged automatically.
                 Use “Check for new builds” to pull them now.
               </p>
             </div>

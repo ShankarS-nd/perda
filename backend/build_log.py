@@ -1,5 +1,6 @@
 """
-build_log.py — log every successful Test_Automation_Parallel build.
+build_log.py — log every successful Test_Automation_Parallel_v2 build (older builds from
+Test_Automation_Parallel stay in the log; that job no longer produces builds).
 
 For each SUCCESS build we pull only the small artifacts Jenkins already
 publishes (overall_summary.txt, parameters.json) plus the two DAST report pages
@@ -29,7 +30,7 @@ logger = logging.getLogger("uvicorn.error")
 
 JENKINS_JOB_URL = (
     "https://build-device.netradyne.info/view/Daily_Build_Pipeline"
-    "/job/Test_Automation_Parallel"
+    "/job/Test_Automation_Parallel_v2"
 )
 REQUEST_TIMEOUT = 30
 DEFAULT_LOOKBACK = 30
