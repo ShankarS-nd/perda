@@ -805,6 +805,47 @@ def get_review_runs(tc_key: str | None = None, limit: int = 20) -> list[dict[str
         conn.close()
 
 
+def get_generated_tcs_by_ticket(dt_keys: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """
+    Generated testcases for each Jira ticket, with their device-validation state.
+
+    A testcase counts as validated once a run on a fixed device has Passed —
+    pre-fix runs are expected to fail and say nothing about whether the test
+    passes on the fix, so they're left out of this.
+    """
+    if not dt_keys:
+        return {}
+    conn = _connect()
+    try:
+        marks = ",".join("?" * len(dt_keys))
+        rows = conn.execute(
+            f"""
+            SELECT t.dt, t.tc_key, t.tc_id, t.review_status,
+                   COALESCE(SUM(CASE WHEN r.device_stage = 'fixed' AND r.status = 'Pass'
+                                     THEN 1 ELSE 0 END), 0) AS fixed_passes,
+                   COUNT(r.id) AS runs
+              FROM review_testcases t
+              LEFT JOIN review_runs r ON r.testcase_id = t.id
+             WHERE t.dt IN ({marks})
+             GROUP BY t.id
+             ORDER BY t.tc_id
+            """,
+            dt_keys,
+        ).fetchall()
+        out: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            out.setdefault(r["dt"], []).append({
+                "tc_key": r["tc_key"],
+                "tc_id": r["tc_id"],
+                "review_status": r["review_status"],
+                "validated": r["fixed_passes"] > 0,
+                "runs": r["runs"],
+            })
+        return out
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Build log
 # ---------------------------------------------------------------------------

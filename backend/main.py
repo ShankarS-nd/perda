@@ -26,6 +26,9 @@ Build Log endpoints:
   POST /build-log/sync        → pull new successful builds from Jenkins now (?full=true backfills all history)
   GET  /build-log/sync-status → progress of the sync in flight
 
+Release Tickets endpoint:
+  GET  /release-tickets       → Jira tickets of a fix version/sprint with TC coverage columns
+
 Device Logs endpoints:
   POST /device-logs/download  → run logs_download.py via SSE stream
   GET  /device-logs/files     → list processed log service files for device+date
@@ -145,6 +148,7 @@ from database import (
     get_review_runs,
     get_logged_builds,
     get_build_filter_options,
+    get_generated_tcs_by_ticket,
 )
 from workflow_engine import run_workflow
 
@@ -454,6 +458,30 @@ async def build_log_sync_status():
     import build_log
 
     return build_log.get_sync_status()
+
+
+@app.get("/release-tickets")
+async def release_tickets(
+    fix_version: str = Query(..., min_length=1, description="Jira fix version name, e.g. x.6.19.rc.1"),
+    project: str = Query("Device_Tracker", description="Jira project key or name; empty for all projects"),
+    sprint: str = Query("", description="Sprint id or name; empty for any sprint"),
+):
+    """Tickets of one release, each with its TC ticket and generated-TC coverage."""
+    import jira_tickets
+
+    try:
+        tickets = await asyncio.to_thread(
+            jira_tickets.fetch_tickets, fix_version.strip(), project.strip(), sprint.strip()
+        )
+    except jira_tickets.JiraError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+    generated = get_generated_tcs_by_ticket([t["key"] for t in tickets])
+    for t in tickets:
+        t["generated_tcs"] = generated.get(t["key"], [])
+        # No source for this yet — which runs a ticket's TCs went into is not recorded.
+        t["included_in_runs"] = []
+    return {"tickets": tickets, "total": len(tickets)}
 
 
 @app.post("/run-script")
