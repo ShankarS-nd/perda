@@ -657,10 +657,10 @@ export default function Home() {
             className={
               activePage === "workflows"
                 ? "p-4"
-                : activePage === "review-bench"
-                // Testcase source runs to ~200 columns; the 1440px measure that
-                // suits prose pages forces sideways scrolling here, so this one
-                // takes the window.
+                : activePage === "review-bench" || activePage === "release-tickets"
+                // Testcase source runs to ~200 columns, and the ticket table has a
+                // dozen; the 1440px measure that suits prose pages forces sideways
+                // scrolling, so these take the window.
                 ? "px-6 lg:px-8 py-6 lg:py-8 w-full"
                 : "px-6 lg:px-8 xl:px-10 py-6 lg:py-8 mx-auto w-full max-w-[1440px]"
             }

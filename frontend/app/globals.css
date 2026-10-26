@@ -1169,3 +1169,12 @@ html.light .sidebar-item-btn[data-active="true"] {
 .ds-pill-select option { background: #14161f; color: #e5e7eb; }
 html.light .ds-pill-select { color-scheme: light; }
 html.light .ds-pill-select option { background: #ffffff; color: #111827; }
+
+/* Release Tickets: a row a teammate just edited lights up, then settles. */
+@keyframes rtFlash {
+  from { background-color: rgba(99, 102, 241, 0.22); }
+  to   { background-color: transparent; }
+}
+.rt-flash {
+  animation: rtFlash 2.4s var(--ease-soft) both;
+}
