@@ -213,6 +213,19 @@ def init_db() -> None:
                 report_url    TEXT     NOT NULL DEFAULT '',
                 logged_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            -- Team-maintained status of a Jira ticket's test coverage (Release
+            -- Tickets page). One row per ticket, edited by hand and shared by
+            -- everyone using the page. Each column is written on its own, so two
+            -- people editing different cells of a row never overwrite each other.
+            CREATE TABLE IF NOT EXISTS ticket_status (
+                dt               TEXT     PRIMARY KEY,
+                generated_tcs    TEXT     NOT NULL DEFAULT '',
+                validated        TEXT     NOT NULL DEFAULT '',
+                included_in_runs TEXT     NOT NULL DEFAULT '',
+                updated_by       TEXT     NOT NULL DEFAULT '',
+                updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
         """)
 
         # CREATE TABLE IF NOT EXISTS leaves an already-created table alone, so a
@@ -805,43 +818,40 @@ def get_review_runs(tc_key: str | None = None, limit: int = 20) -> list[dict[str
         conn.close()
 
 
-def get_generated_tcs_by_ticket(dt_keys: list[str]) -> dict[str, list[dict[str, Any]]]:
-    """
-    Generated testcases for each Jira ticket, with their device-validation state.
+TICKET_STATUS_FIELDS = ("generated_tcs", "validated", "included_in_runs")
 
-    A testcase counts as validated once a run on a fixed device has Passed —
-    pre-fix runs are expected to fail and say nothing about whether the test
-    passes on the fix, so they're left out of this.
-    """
-    if not dt_keys:
-        return {}
+
+def get_ticket_statuses() -> dict[str, dict[str, Any]]:
+    """Every ticket that has had a status entered, keyed by Jira key."""
     conn = _connect()
     try:
-        marks = ",".join("?" * len(dt_keys))
-        rows = conn.execute(
+        rows = conn.execute("SELECT * FROM ticket_status").fetchall()
+        return {r["dt"]: dict(r) for r in rows}
+    finally:
+        conn.close()
+
+
+def set_ticket_status(dt: str, field: str, value: str, actor: str) -> dict[str, Any]:
+    """Set one status column of a ticket, leaving its other columns alone."""
+    if field not in TICKET_STATUS_FIELDS:
+        raise ValueError(f"unknown field: {field}")
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _connect()
+    try:
+        # `field` is checked against the whitelist above, so it is safe to inline.
+        conn.execute(
             f"""
-            SELECT t.dt, t.tc_key, t.tc_id, t.review_status,
-                   COALESCE(SUM(CASE WHEN r.device_stage = 'fixed' AND r.status = 'Pass'
-                                     THEN 1 ELSE 0 END), 0) AS fixed_passes,
-                   COUNT(r.id) AS runs
-              FROM review_testcases t
-              LEFT JOIN review_runs r ON r.testcase_id = t.id
-             WHERE t.dt IN ({marks})
-             GROUP BY t.id
-             ORDER BY t.tc_id
+            INSERT INTO ticket_status (dt, {field}, updated_by, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(dt) DO UPDATE SET
+                {field} = excluded.{field},
+                updated_by = excluded.updated_by,
+                updated_at = excluded.updated_at
             """,
-            dt_keys,
-        ).fetchall()
-        out: dict[str, list[dict[str, Any]]] = {}
-        for r in rows:
-            out.setdefault(r["dt"], []).append({
-                "tc_key": r["tc_key"],
-                "tc_id": r["tc_id"],
-                "review_status": r["review_status"],
-                "validated": r["fixed_passes"] > 0,
-                "runs": r["runs"],
-            })
-        return out
+            (dt, value, actor, now),
+        )
+        conn.commit()
+        return dict(conn.execute("SELECT * FROM ticket_status WHERE dt = ?", (dt,)).fetchone())
     finally:
         conn.close()
 

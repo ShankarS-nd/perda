@@ -27,7 +27,9 @@ Build Log endpoints:
   GET  /build-log/sync-status → progress of the sync in flight
 
 Release Tickets endpoint:
-  GET  /release-tickets       → Jira tickets of a fix version/sprint with TC coverage columns
+  GET  /release-tickets       → Jira tickets of a fix version/sprint with their TC tickets and team status
+  GET  /ticket-status         → the team-entered status of every ticket (polled so edits show live)
+  PUT  /ticket-status/{key}   → set one status column of a ticket
 
 Device Logs endpoints:
   POST /device-logs/download  → run logs_download.py via SSE stream
@@ -148,7 +150,9 @@ from database import (
     get_review_runs,
     get_logged_builds,
     get_build_filter_options,
-    get_generated_tcs_by_ticket,
+    get_ticket_statuses,
+    set_ticket_status,
+    TICKET_STATUS_FIELDS,
 )
 from workflow_engine import run_workflow
 
@@ -460,28 +464,60 @@ async def build_log_sync_status():
     return build_log.get_sync_status()
 
 
+# Dropdown columns accept only these values; "" clears the cell. Included in runs is free text.
+_TICKET_STATUS_CHOICES = {
+    "generated_tcs": {"", "Yes", "In progress", "No", "N/A"},
+    "validated": {"", "Yes", "Partial", "No", "N/A"},
+}
+
+
 @app.get("/release-tickets")
 async def release_tickets(
     fix_version: str = Query(..., min_length=1, description="Jira fix version name, e.g. x.6.19.rc.1"),
     project: str = Query("Device_Tracker", description="Jira project key or name; empty for all projects"),
     sprint: str = Query("", description="Sprint id or name; empty for any sprint"),
 ):
-    """Tickets of one release, each with its TC ticket and generated-TC coverage."""
+    """Tickets of one release, each with its linked TC tickets and team-entered status."""
     import jira_tickets
 
+    fix_version, project, sprint = fix_version.strip(), project.strip(), sprint.strip()
     try:
-        tickets = await asyncio.to_thread(
-            jira_tickets.fetch_tickets, fix_version.strip(), project.strip(), sprint.strip()
-        )
+        tickets = await asyncio.to_thread(jira_tickets.fetch_tickets, fix_version, project, sprint)
     except jira_tickets.JiraError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
+    return {
+        "tickets": tickets,
+        "total": len(tickets),
+        "jql": jira_tickets.build_jql(fix_version, project, sprint),
+        "status": get_ticket_statuses(),
+    }
 
-    generated = get_generated_tcs_by_ticket([t["key"] for t in tickets])
-    for t in tickets:
-        t["generated_tcs"] = generated.get(t["key"], [])
-        # No source for this yet — which runs a ticket's TCs went into is not recorded.
-        t["included_in_runs"] = []
-    return {"tickets": tickets, "total": len(tickets)}
+
+@app.get("/ticket-status")
+async def ticket_status_list():
+    """Everything the team has entered. Cheap, so the page polls it for live edits."""
+    return get_ticket_statuses()
+
+
+class TicketStatusRequest(BaseModel):
+    field: str
+    value: str = ""
+    actor: str = ""
+
+
+@app.put("/ticket-status/{key}")
+async def ticket_status_set(key: str, payload: TicketStatusRequest):
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*-\d+", key):
+        raise HTTPException(status_code=400, detail="Not a Jira key")
+    if payload.field not in TICKET_STATUS_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unknown field: {payload.field}")
+    value = payload.value.strip()
+    allowed = _TICKET_STATUS_CHOICES.get(payload.field)
+    if allowed is not None and value not in allowed:
+        raise HTTPException(status_code=400, detail=f"{payload.field} must be one of: {', '.join(sorted(v or '(blank)' for v in allowed))}")
+    if len(value) > 500:
+        raise HTTPException(status_code=400, detail="Value is too long")
+    return set_ticket_status(key.upper(), payload.field, value, payload.actor.strip()[:80])
 
 
 @app.post("/run-script")

@@ -1,18 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface GeneratedTC {
-  tc_key: string;
-  tc_id: string;
-  review_status: string;
-  validated: boolean;
-  runs: number;
+/** What the team has entered for a ticket. Shared by everyone on the page. */
+interface TicketStatus {
+  generated_tcs: string;
+  validated: string;
+  included_in_runs: string;
+  updated_by: string;
+  updated_at: string;
 }
+
+type StatusField = "generated_tcs" | "validated" | "included_in_runs";
 
 interface Ticket {
   key: string;
@@ -23,8 +26,6 @@ interface Ticket {
   assignee: string;
   labels: string[];
   tc_tickets: string[];
-  generated_tcs: GeneratedTC[];
-  included_in_runs: string[];
 }
 
 interface Query {
@@ -36,6 +37,14 @@ interface Query {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://172.16.23.15:8000";
 const JIRA_BASE = "https://netradyne.atlassian.net";
 const STORAGE_KEY = "perda.releaseTickets.query";
+// Same browser key Review Bench uses, so a name set there is picked up here.
+const NAME_KEY = "perda-review-reviewer";
+// How often other people's edits are pulled in. This re-reads saved statuses
+// only; Jira is not queried again until "Fetch tickets" is clicked.
+const POLL_MS = 10_000;
+
+const GENERATED_CHOICES = ["Yes", "In progress", "No", "N/A"];
+const VALIDATED_CHOICES = ["Yes", "Partial", "No", "N/A"];
 
 const DEFAULT_QUERY: Query = { fixVersion: "", project: "Device_Tracker", sprint: "" };
 
@@ -66,11 +75,96 @@ function statusStyle(status: string): string {
   return "bg-white/[0.06] text-gray-300";
 }
 
+const CHOICE_STYLE: Record<string, string> = {
+  Yes: "text-emerald-300",
+  Partial: "text-amber-300",
+  "In progress": "text-amber-300",
+  No: "text-red-300",
+};
+
+function whoWhen(st: TicketStatus | undefined): string {
+  if (!st?.updated_by && !st?.updated_at) return "";
+  const when = st.updated_at ? new Date(st.updated_at).toLocaleString() : "";
+  return `Last edited${st.updated_by ? ` by ${st.updated_by}` : ""}${when ? ` · ${when}` : ""}`;
+}
+
+const blankStatus: TicketStatus = {
+  generated_tcs: "", validated: "", included_in_runs: "", updated_by: "", updated_at: "",
+};
+
+const pick = (st: TicketStatus, field: StatusField): Partial<TicketStatus> => ({ [field]: st[field] });
+
 const Dash = () => <span className="text-gray-600">—</span>;
 
 const Badge = ({ className, children }: { className: string; children: React.ReactNode }) => (
   <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${className}`}>{children}</span>
 );
+
+// ---------------------------------------------------------------------------
+// Editable cells
+// ---------------------------------------------------------------------------
+
+type Save = (key: string, field: StatusField, value: string) => void;
+type Editing = (key: string, field: StatusField, on: boolean) => void;
+
+function StatusSelect({
+  ticket, field, value, choices, title, onSave,
+}: {
+  ticket: string; field: StatusField; value: string; choices: string[]; title: string; onSave: Save;
+}) {
+  return (
+    <select
+      value={value}
+      title={title}
+      aria-label={`${field.replace("_", " ")} for ${ticket}`}
+      onChange={(e) => onSave(ticket, field, e.target.value)}
+      className={`rounded-md border border-white/[0.07] bg-white/[0.02] px-2 py-1 text-[12px] outline-none focus:border-indigo-400/50 ${
+        CHOICE_STYLE[value] ?? "text-gray-500"
+      }`}
+    >
+      <option value="">—</option>
+      {choices.map((c) => <option key={c}>{c}</option>)}
+    </select>
+  );
+}
+
+function StatusText({
+  ticket, field, value, title, placeholder, onSave, onEditing,
+}: {
+  ticket: string; field: StatusField; value: string; title: string; placeholder: string;
+  onSave: Save; onEditing: Editing;
+}) {
+  const [draft, setDraft] = useState(value);
+  const focused = useRef(false);
+
+  // Take a teammate's edit unless this cell is the one being typed in.
+  useEffect(() => {
+    if (!focused.current) setDraft(value);
+  }, [value]);
+
+  const commit = () => {
+    focused.current = false;
+    onEditing(ticket, field, false);
+    if (draft.trim() !== value) onSave(ticket, field, draft.trim());
+  };
+
+  return (
+    <input
+      value={draft}
+      title={title}
+      placeholder={placeholder}
+      aria-label={`${field.replace(/_/g, " ")} for ${ticket}`}
+      onFocus={() => { focused.current = true; onEditing(ticket, field, true); }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") { setDraft(value); (e.target as HTMLInputElement).blur(); }
+      }}
+      className="w-36 rounded-md border border-white/[0.07] bg-white/[0.02] px-2 py-1 text-[12px] text-gray-200 outline-none placeholder:text-gray-600 focus:border-indigo-400/50"
+    />
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -79,6 +173,10 @@ const Badge = ({ className, children }: { className: string; children: React.Rea
 export default function ReleaseTickets() {
   const [query, setQuery] = useState<Query>(() => (typeof window === "undefined" ? DEFAULT_QUERY : loadQuery()));
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
+  const [teamStatus, setTeamStatus] = useState<Record<string, TicketStatus>>({});
+  const [jql, setJql] = useState("");
+  // Cells currently being typed in; a refresh must not overwrite these.
+  const editing = useRef(new Set<string>());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +184,76 @@ export default function ReleaseTickets() {
   const [status, setStatus] = useState("");
   const [type, setType] = useState("");
   const [tcFilter, setTcFilter] = useState<"" | "missing" | "unvalidated">("");
+
+  const statusOf = (key: string, field: StatusField) => teamStatus[key]?.[field] ?? "";
+
+  // Pull in other people's edits while the page is open.
+  useEffect(() => {
+    if (!tickets) return;
+    const refresh = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch(`${API_BASE}/ticket-status`);
+        if (!res.ok) return;
+        const fresh: Record<string, TicketStatus> = await res.json();
+        setTeamStatus((prev) => {
+          const next = { ...fresh };
+          editing.current.forEach((id) => {
+            const [key] = id.split(":");
+            if (prev[key]) next[key] = { ...(next[key] ?? prev[key]), ...pick(prev[key], id.split(":")[1] as StatusField) };
+          });
+          return next;
+        });
+      } catch {
+        /* a missed refresh is harmless; the next one catches up */
+      }
+    };
+    const timer = setInterval(refresh, POLL_MS);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [tickets]);
+
+  const markEditing: Editing = useCallback((key, field, on) => {
+    const id = `${key}:${field}`;
+    if (on) editing.current.add(id);
+    else editing.current.delete(id);
+  }, []);
+
+  const save: Save = async (key, field, value) => {
+    let name = "";
+    try { name = localStorage.getItem(NAME_KEY) ?? ""; } catch { /* no storage */ }
+    if (!name) {
+      name = (window.prompt("Your name — shown next to your edits:") ?? "").trim();
+      if (name) {
+        try { localStorage.setItem(NAME_KEY, name); } catch { /* not remembered */ }
+      }
+    }
+    const before = teamStatus[key];
+    setError(null);
+    setTeamStatus((s) => ({ ...s, [key]: { ...blankStatus, ...s[key], [field]: value, updated_by: name } }));
+    try {
+      const res = await fetch(`${API_BASE}/ticket-status/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field, value, actor: name }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail ?? `Save failed (HTTP ${res.status})`);
+      setTeamStatus((s) => ({ ...s, [key]: body }));
+    } catch (e) {
+      // Put the cell back so the screen never shows something that wasn't saved.
+      setTeamStatus((s) => {
+        const next = { ...s };
+        if (before) next[key] = before;
+        else delete next[key];
+        return next;
+      });
+      setError(`${key}: ${e instanceof Error ? e.message : "could not save"}`);
+    }
+  };
 
   const load = async () => {
     if (!query.fixVersion.trim()) {
@@ -109,6 +277,8 @@ export default function ReleaseTickets() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.detail ?? `Request failed (HTTP ${res.status})`);
       setTickets(body.tickets);
+      setTeamStatus(body.status ?? {});
+      setJql(body.jql ?? "");
       setStatus("");
       setType("");
       setSearch("");
@@ -130,15 +300,14 @@ export default function ReleaseTickets() {
       if (status && t.status !== status) return false;
       if (type && t.issue_type !== type) return false;
       if (tcFilter === "missing" && t.tc_tickets.length > 0) return false;
-      if (tcFilter === "unvalidated" && (t.generated_tcs.length === 0 || t.generated_tcs.every((g) => g.validated)))
-        return false;
+      if (tcFilter === "unvalidated" && ["Yes", "N/A"].includes(teamStatus[t.key]?.validated ?? "")) return false;
       if (!q) return true;
       return [t.key, t.summary, t.assignee, ...t.labels].some((v) => v.toLowerCase().includes(q));
     });
-  }, [tickets, search, status, type, tcFilter]);
+  }, [tickets, teamStatus, search, status, type, tcFilter]);
 
   const withTc = (tickets ?? []).filter((t) => t.tc_tickets.length > 0).length;
-  const withGenerated = (tickets ?? []).filter((t) => t.generated_tcs.length > 0).length;
+  const validatedCount = (tickets ?? []).filter((t) => statusOf(t.key, "validated") === "Yes").length;
 
   const setField = (k: keyof Query) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setQuery((q) => ({ ...q, [k]: e.target.value }));
@@ -171,7 +340,7 @@ export default function ReleaseTickets() {
           />
         </label>
         <label className="flex w-[140px] flex-col gap-1 text-[11px] font-medium uppercase tracking-wider text-gray-600">
-          Sprint id
+          Sprint id <span className="normal-case tracking-normal text-gray-600">(blank = whole fix version)</span>
           <input
             value={query.sprint}
             onChange={setField("sprint")}
@@ -201,9 +370,15 @@ export default function ReleaseTickets() {
               </span>
             </h3>
             <p className="text-[11px] text-gray-600">
-              {withTc} with a TC ticket · {withGenerated} with generated TCs
+              {withTc} with a TC ticket · {validatedCount} validated in device
             </p>
           </div>
+
+          {jql && (
+            <p className="border-b border-white/[0.05] px-4 py-2 text-[11px] text-gray-600">
+              JQL: <span className="select-all font-mono text-gray-500">{jql}</span>
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2.5 border-b border-white/[0.05] px-4 py-3">
             <input
@@ -229,7 +404,7 @@ export default function ReleaseTickets() {
             >
               <option value="">Any TC coverage</option>
               <option value="missing">No TC ticket</option>
-              <option value="unvalidated">Generated, not validated</option>
+              <option value="unvalidated">Not validated in device</option>
             </select>
           </div>
 
@@ -255,7 +430,7 @@ export default function ReleaseTickets() {
                 </thead>
                 <tbody>
                   {shown.map((t) => {
-                    const validated = t.generated_tcs.filter((g) => g.validated).length;
+                    const edited = whoWhen(teamStatus[t.key]);
                     return (
                       <tr key={t.key} className="align-top">
                         <td className="whitespace-nowrap">
@@ -299,33 +474,23 @@ export default function ReleaseTickets() {
                           )}
                         </td>
                         <td>
-                          {t.generated_tcs.length === 0 ? (
-                            <Dash />
-                          ) : (
-                            <div className="flex flex-col gap-0.5" title={t.generated_tcs.map((g) => g.tc_key).join("\n")}>
-                              <span className="font-medium text-gray-200">{t.generated_tcs.length}</span>
-                              <span className="text-[11px] text-gray-500">{t.generated_tcs.map((g) => g.tc_id).join(", ")}</span>
-                            </div>
-                          )}
+                          <StatusSelect
+                            ticket={t.key} field="generated_tcs" choices={GENERATED_CHOICES} title={edited}
+                            value={statusOf(t.key, "generated_tcs")} onSave={save}
+                          />
                         </td>
                         <td>
-                          {t.generated_tcs.length === 0 ? (
-                            <Dash />
-                          ) : (
-                            <Badge
-                              className={
-                                validated === t.generated_tcs.length
-                                  ? "bg-emerald-500/10 text-emerald-300"
-                                  : validated > 0
-                                  ? "bg-amber-500/10 text-amber-300"
-                                  : "bg-white/[0.06] text-gray-400"
-                              }
-                            >
-                              {validated}/{t.generated_tcs.length} validated
-                            </Badge>
-                          )}
+                          <StatusSelect
+                            ticket={t.key} field="validated" choices={VALIDATED_CHOICES} title={edited}
+                            value={statusOf(t.key, "validated")} onSave={save}
+                          />
                         </td>
-                        <td>{t.included_in_runs.length === 0 ? <Dash /> : t.included_in_runs.join(", ")}</td>
+                        <td>
+                          <StatusText
+                            ticket={t.key} field="included_in_runs" title={edited} placeholder="e.g. #4821"
+                            value={statusOf(t.key, "included_in_runs")} onSave={save} onEditing={markEditing}
+                          />
+                        </td>
                       </tr>
                     );
                   })}
