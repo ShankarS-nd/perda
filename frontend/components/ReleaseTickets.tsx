@@ -28,6 +28,9 @@ interface Ticket {
   tc_tickets: string[];
 }
 
+interface VersionOption { id: string; name: string; released: boolean }
+interface SprintOption { id: number; name: string; state: string }
+
 interface Query {
   fixVersion: string;
   project: string;
@@ -295,6 +298,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
   const [query, setQuery] = useState<Query>(() =>
     typeof window === "undefined" ? DEFAULT_QUERY : { ...loadQuery(), ...initialQuery }
   );
+  const [options, setOptions] = useState<{ versions: VersionOption[]; sprints: SprintOption[] } | null>(null);
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [teamStatus, setTeamStatus] = useState<Record<string, TicketStatus>>({});
   const [jql, setJql] = useState("");
@@ -323,7 +327,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
 
   const load = useCallback(async (q: Query) => {
     if (!q.fixVersion.trim()) {
-      setError("Enter a fix version, e.g. x.6.19.rc.1");
+      setError("Choose a fix version first");
       return;
     }
     setLoading(true);
@@ -355,6 +359,27 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
       setLoading(false);
     }
   }, []);
+
+  // What the two dropdowns offer, straight from Jira.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/release-tickets/options`);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.detail ?? `Could not load fix versions (HTTP ${res.status})`);
+        setOptions(body);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not load fix versions and sprints");
+      }
+    })();
+  }, []);
+
+  // Choosing from a dropdown loads that release straight away.
+  const choose = (patch: Partial<Query>) => {
+    const next = { ...query, ...patch };
+    setQuery(next);
+    if (next.fixVersion) load(next);
+  };
 
   // Reopening the page picks up where the last visit left off.
   useEffect(() => {
@@ -508,8 +533,14 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
   const filtered = !!(search || status || type || slice);
   const clearFilters = () => { setSearch(""); setStatus(""); setType(""); setSlice(""); };
 
-  const setQ = (k: keyof Query) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setQuery((q) => ({ ...q, [k]: e.target.value }));
+  // Sprints are named after their release ("x.6.19_Sprint1" for "x.6.19.rc.1"),
+  // so the ones for the chosen fix version go first.
+  const sprintPrefix = /^(x\.\d+\.\d+)/.exec(query.fixVersion)?.[1] ?? null;
+  const sprintsFor = (options?.sprints ?? []).filter((sp) => sprintPrefix && sp.name.startsWith(`${sprintPrefix}_`));
+  const sprintsOther = (options?.sprints ?? []).filter((sp) => !sprintsFor.includes(sp));
+  const sprintLabel = (sp: SprintOption) => (sp.state === "active" ? `${sp.name} · active` : sp.name);
+  const releaseBuilds = (options?.versions ?? []).filter((v) => /^x\.\d+\.\d+\.rc\./.test(v.name));
+  const otherVersions = (options?.versions ?? []).filter((v) => !releaseBuilds.includes(v));
 
   const pct = (n: number) => (stats.total ? (n / stats.total) * 100 : 0);
 
@@ -522,27 +553,54 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
         onSubmit={(e) => { e.preventDefault(); load(query); }}
         className="ds-card flex flex-wrap items-end gap-x-3 gap-y-3 p-4"
       >
-        <label className="flex min-w-[220px] flex-[2] flex-col gap-1.5">
+        <label className="flex min-w-[220px] flex-1 flex-col gap-1.5">
           <span className="text-[11px] font-medium uppercase tracking-wider text-gray-500">Fix version</span>
-          <input value={query.fixVersion} onChange={setQ("fixVersion")} placeholder="x.6.19.rc.1" className="ds-input !text-[13px]" />
-        </label>
-        <label className="flex min-w-[160px] flex-1 flex-col gap-1.5">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-gray-500">Project</span>
-          <input value={query.project} onChange={setQ("project")} placeholder="all projects" className="ds-input !text-[13px]" />
-        </label>
-        <label className="flex w-[150px] flex-col gap-1.5">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-gray-500">Sprint id</span>
-          <input
-            value={query.sprint} onChange={setQ("sprint")} placeholder="any sprint" inputMode="numeric"
-            title="Leave blank for every ticket in the fix version, including ones in no sprint"
+          <select
+            value={query.fixVersion}
+            onChange={(e) => choose({ fixVersion: e.target.value, sprint: "" })}
+            disabled={!options}
             className="ds-input !text-[13px]"
-          />
+          >
+            <option value="">{options ? "Choose a fix version…" : "Loading from Jira…"}</option>
+            <optgroup label="Release builds">
+              {releaseBuilds.map((v) => <option key={v.id} value={v.name}>{v.name}{v.released ? " · released" : ""}</option>)}
+            </optgroup>
+            {otherVersions.length > 0 && (
+              <optgroup label="Other versions">
+                {otherVersions.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+              </optgroup>
+            )}
+            {/* A remembered version that Jira no longer lists still needs to show. */}
+            {options && query.fixVersion && !options.versions.some((v) => v.name === query.fixVersion) && (
+              <option value={query.fixVersion}>{query.fixVersion}</option>
+            )}
+          </select>
         </label>
-        <button type="submit" disabled={loading} className="ds-btn-primary">
+        <label className="flex min-w-[220px] flex-1 flex-col gap-1.5">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-gray-500">Sprint</span>
+          <select
+            value={query.sprint}
+            onChange={(e) => choose({ sprint: e.target.value })}
+            disabled={!options || !query.fixVersion}
+            title="Leave on All sprints for every ticket in the fix version, including ones in no sprint"
+            className="ds-input !text-[13px]"
+          >
+            <option value="">All sprints</option>
+            {sprintsFor.length > 0 && (
+              <optgroup label={`${sprintPrefix} sprints`}>
+                {sprintsFor.map((sp) => <option key={sp.id} value={String(sp.id)}>{sprintLabel(sp)}</option>)}
+              </optgroup>
+            )}
+            <optgroup label={sprintsFor.length > 0 ? "Other sprints" : "Sprints"}>
+              {sprintsOther.map((sp) => <option key={sp.id} value={String(sp.id)}>{sprintLabel(sp)}</option>)}
+            </optgroup>
+          </select>
+        </label>
+        <button type="submit" disabled={loading || !query.fixVersion} className="ds-btn-primary">
           <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-          {loading ? "Fetching…" : tickets ? "Refresh from Jira" : "Fetch tickets"}
+          {loading ? "Fetching…" : "Refresh from Jira"}
         </button>
       </form>
 
@@ -793,7 +851,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
         <div className="ds-card ds-empty">
           <p className="mb-1 text-[15px] font-medium text-gray-400">No release loaded</p>
           <p className="max-w-sm text-sm text-gray-600">
-            Enter a fix version (and optionally a sprint id) to pull its tickets from Jira.
+            Choose a fix version, and optionally a sprint, to list its tickets from Jira.
           </p>
         </div>
       )}

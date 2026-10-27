@@ -8,12 +8,15 @@ backend/.env: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN (an Atlassian API token)
 
 import os
 import re
+import time
 from typing import Any
 
 import requests
 
 JIRA_BASE_URL = os.getenv("JIRA_BASE_URL", "https://netradyne.atlassian.net").rstrip("/")
 DEFAULT_PROJECT = "Device_Tracker"
+# The key behind that project name, used by the version and board lookups.
+PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "DT")
 
 # Test-case tickets live in their own project and hang off the bug/story with a
 # "Test" link (e.g. DT-5192 → TC-5204, TC-5205).
@@ -119,3 +122,67 @@ def fetch_tickets(fix_version: str, project: str = DEFAULT_PROJECT, sprint: str 
         if not token or data.get("isLast"):
             break
     return tickets
+
+
+# ---------------------------------------------------------------------------
+# Dropdown options
+# ---------------------------------------------------------------------------
+
+_OPTIONS_TTL = 300  # seconds — versions and sprints change rarely
+_options_cache: tuple[float, dict[str, Any]] | None = None
+
+
+def _get(path: str, **params: Any) -> Any:
+    try:
+        resp = requests.get(
+            f"{JIRA_BASE_URL}{path}", params=params, auth=_auth(), timeout=30,
+            headers={"Accept": "application/json"},
+        )
+    except requests.RequestException as exc:
+        raise JiraError(f"Could not reach Jira: {exc}")
+    if resp.status_code in (401, 403):
+        raise JiraError("Jira rejected the credentials — check JIRA_EMAIL and JIRA_API_TOKEN.", status=401)
+    if not resp.ok:
+        raise JiraError(f"Jira returned HTTP {resp.status_code}.")
+    return resp.json()
+
+
+def _version_order(name: str) -> tuple:
+    """Release builds ("x.6.19.rc.1") first, newest first; everything else after, A–Z."""
+    m = re.match(r"^x\.(\d+)\.(\d+)\.rc\.(\d+)", name)
+    if m:
+        return (0, tuple(-int(g) for g in m.groups()), name)
+    return (1, (), name.lower())
+
+
+def fetch_options() -> dict[str, list[dict[str, Any]]]:
+    """Fix versions of the project and the sprints of its boards, for the page's dropdowns."""
+    global _options_cache
+    if _options_cache and time.time() - _options_cache[0] < _OPTIONS_TTL:
+        return _options_cache[1]
+
+    versions = [
+        {"id": v["id"], "name": v["name"], "released": bool(v.get("released"))}
+        for v in _get(f"/rest/api/3/project/{PROJECT_KEY}/versions")
+        if not v.get("archived")
+    ]
+    versions.sort(key=lambda v: _version_order(v["name"]))
+
+    sprints: dict[int, dict[str, Any]] = {}
+    for board in _get("/rest/agile/1.0/board", projectKeyOrId=PROJECT_KEY).get("values", []):
+        if board.get("type") != "scrum":  # kanban boards have no sprints
+            continue
+        start = 0
+        while True:
+            page = _get(f"/rest/agile/1.0/board/{board['id']}/sprint", startAt=start, maxResults=50)
+            values = page.get("values", [])
+            for sp in values:
+                sprints[sp["id"]] = {"id": sp["id"], "name": sp["name"], "state": sp.get("state", "")}
+            if not values or page.get("isLast"):
+                break
+            start += len(values)
+
+    # Newest first: ids only ever grow.
+    out = {"versions": versions, "sprints": sorted(sprints.values(), key=lambda s: -s["id"])}
+    _options_cache = (time.time(), out)
+    return out

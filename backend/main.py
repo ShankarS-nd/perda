@@ -28,6 +28,7 @@ Build Log endpoints:
 
 Release Tickets endpoint:
   GET  /release-tickets       → Jira tickets of a fix version/sprint with their TC tickets and team status
+  GET  /release-tickets/options → fix versions and sprints for the page's dropdowns
   GET  /ticket-status         → the team-entered status of every ticket (polled so edits show live)
   PUT  /ticket-status/{key}   → set one status column of a ticket
 
@@ -469,6 +470,17 @@ _TICKET_STATUS_CHOICES = {
     "generated_tcs": {"", "Yes", "In progress", "No", "N/A"},
     "validated": {"", "Yes", "Partial", "No", "N/A"},
 }
+
+
+@app.get("/release-tickets/options")
+async def release_ticket_options():
+    """Fix versions and sprints to choose from, straight from Jira (cached a few minutes)."""
+    import jira_tickets
+
+    try:
+        return await asyncio.to_thread(jira_tickets.fetch_options)
+    except jira_tickets.JiraError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
 
 
 @app.get("/release-tickets")
