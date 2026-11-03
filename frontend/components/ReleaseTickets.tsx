@@ -26,7 +26,26 @@ interface Ticket {
   assignee: string;
   labels: string[];
   tc_tickets: string[];
+  prs: PullRequest[] | null; // null: Jira could not report PRs for this ticket
 }
+
+interface PullRequest {
+  id: string;
+  title: string;
+  url: string;
+  status: string; // OPEN | MERGED | DECLINED | …
+  repo: string;
+  author: string;
+  target: string;
+}
+
+const PR_STYLE: Record<string, string> = {
+  MERGED: "bg-violet-500/10 text-violet-300 ring-violet-500/25",
+  OPEN: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/25",
+  DECLINED: "bg-red-500/10 text-red-300 ring-red-500/25",
+  DRAFT: "bg-amber-500/10 text-amber-300 ring-amber-500/25",
+};
+const PR_LABEL: Record<string, string> = { MERGED: "Merged", OPEN: "Open", DECLINED: "Closed", DRAFT: "Draft" };
 
 interface VersionOption { id: string; name: string; released: boolean }
 interface SprintOption { id: number; name: string; state: string }
@@ -726,7 +745,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                 <table className="ds-table min-w-[1200px]">
                   <thead>
                     <tr className="!border-b-0">
-                      <th colSpan={8} className="!px-3 !pb-0 !pt-2.5 !text-[10.5px] !font-semibold uppercase tracking-wider text-gray-600">
+                      <th colSpan={9} className="!px-3 !pb-0 !pt-2.5 !text-[10.5px] !font-semibold uppercase tracking-wider text-gray-600">
                         From Jira
                       </th>
                       <th colSpan={4} className="!px-3 !pb-0 !pt-2.5 !text-[10.5px] !font-semibold uppercase tracking-wider text-indigo-300/80 bg-indigo-500/[0.06]">
@@ -747,6 +766,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                       <Th label="Assignee" col="assignee" sort={sort} onSort={toggleSort} />
                       <Th label="Labels" sort={sort} />
                       <Th label="TC ticket" col="tc" sort={sort} onSort={toggleSort} />
+                      <Th label="Pull requests" sort={sort} />
                       <Th label="Generated TCs" col="generated" sort={sort} onSort={toggleSort} className="bg-indigo-500/[0.06]" />
                       <Th label="Validated in device" col="validated" sort={sort} onSort={toggleSort} className="bg-indigo-500/[0.06]" />
                       <Th label="Included in runs" sort={sort} className="bg-indigo-500/[0.06]" />
@@ -802,6 +822,24 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                               <div className="flex flex-col gap-0.5 text-[12.5px]">
                                 {t.tc_tickets.map((k) => (
                                   <a key={k} href={`${JIRA_BASE}/browse/${k}`} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200 hover:underline">{k}</a>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="!px-3">
+                            {t.prs === null ? (
+                              <span className="text-[11.5px] text-gray-600" title="Jira did not return PR data">Unavailable</span>
+                            ) : t.prs.length === 0 ? <Dash /> : (
+                              <div className="flex min-w-[170px] flex-col gap-1">
+                                {t.prs.map((pr) => (
+                                  <div key={pr.url || pr.id} className="flex items-center gap-1.5 text-[12px]">
+                                    <Pill className={PR_STYLE[pr.status] ?? "bg-white/[0.05] text-gray-300 ring-white/[0.08]"}>
+                                      {PR_LABEL[pr.status] ?? (pr.status || "Unknown")}
+                                    </Pill>
+                                    <a href={pr.url} target="_blank" rel="noreferrer" title={`${pr.title}${pr.target ? ` → ${pr.target}` : ""}${pr.author ? ` · ${pr.author}` : ""}`} className="whitespace-nowrap text-indigo-300 hover:text-indigo-200 hover:underline">
+                                      {pr.repo ? `${pr.repo}${pr.id}` : pr.id}
+                                    </a>
+                                  </div>
                                 ))}
                               </div>
                             )}

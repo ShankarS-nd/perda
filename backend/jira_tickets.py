@@ -9,6 +9,7 @@ backend/.env: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN (an Atlassian API token)
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import requests
@@ -21,6 +22,10 @@ PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "DT")
 # Test-case tickets live in their own project and hang off the bug/story with a
 # "Test" link (e.g. DT-5192 → TC-5204, TC-5205).
 TC_PROJECT = os.getenv("JIRA_TC_PROJECT", "TC")
+
+# Jira's development panel is read through the (undocumented but stable)
+# dev-status API; this is the application type of the GitHub-for-Jira app.
+PR_APP_TYPE = os.getenv("JIRA_PR_APP_TYPE", "oAuth-com.github.integration.production")
 
 _FIELDS = [
     "summary", "issuetype", "status", "resolution", "assignee", "labels",
@@ -78,6 +83,7 @@ def _shape(issue: dict[str, Any]) -> dict[str, Any]:
     f = issue.get("fields") or {}
     return {
         "key": issue["key"],
+        "id": issue.get("id", ""),
         "summary": f.get("summary") or "",
         "issue_type": (f.get("issuetype") or {}).get("name", ""),
         "status": (f.get("status") or {}).get("name", ""),
@@ -121,7 +127,59 @@ def fetch_tickets(fix_version: str, project: str = DEFAULT_PROJECT, sprint: str 
         token = data.get("nextPageToken")
         if not token or data.get("isLast"):
             break
+
+    _attach_prs(tickets)
+    for t in tickets:
+        t.pop("id", None)
     return tickets
+
+
+# ---------------------------------------------------------------------------
+# Pull requests (Jira development panel)
+# ---------------------------------------------------------------------------
+
+_PR_TTL = 60
+_pr_cache: dict[str, tuple[float, list[dict[str, Any]] | None]] = {}
+
+
+def _fetch_prs(issue_id: str) -> list[dict[str, Any]] | None:
+    """PRs linked to one issue, or None if Jira could not say (shown as unknown, not as 'no PRs')."""
+    hit = _pr_cache.get(issue_id)
+    if hit and time.time() - hit[0] < _PR_TTL:
+        return hit[1]
+    prs: list[dict[str, Any]] | None
+    try:
+        resp = requests.get(
+            f"{JIRA_BASE_URL}/rest/dev-status/latest/issue/detail",
+            params={"issueId": issue_id, "applicationType": PR_APP_TYPE, "dataType": "pullrequest"},
+            auth=_auth(), timeout=30, headers={"Accept": "application/json"},
+        )
+        if not resp.ok:
+            prs = None
+        else:
+            prs = []
+            for block in resp.json().get("detail", []):
+                for pr in block.get("pullRequests", []):
+                    prs.append({
+                        "id": pr.get("id", ""),
+                        "title": pr.get("name", ""),
+                        "url": pr.get("url", ""),
+                        "status": (pr.get("status") or "").upper(),
+                        "repo": (pr.get("repositoryName") or "").split("/")[-1],
+                        "author": (pr.get("author") or {}).get("name", ""),
+                        "target": (pr.get("destination") or {}).get("branch", ""),
+                    })
+    except (requests.RequestException, ValueError):
+        prs = None
+    _pr_cache[issue_id] = (time.time(), prs)
+    return prs
+
+
+def _attach_prs(tickets: list[dict[str, Any]]) -> None:
+    _auth()  # fail with the friendly message before fanning out
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for t, prs in zip(tickets, pool.map(lambda t: _fetch_prs(t["id"]), tickets)):
+            t["prs"] = prs
 
 
 # ---------------------------------------------------------------------------
