@@ -57,7 +57,7 @@ interface Query {
 }
 
 /** Which slice of the table a stat tile is showing. */
-type Slice = "" | "no-tc" | "no-generated" | "not-validated" | "no-runs";
+type Slice = "" | "has-tc" | "generated" | "validated" | "in-runs";
 
 type SortKey = "key" | "status" | "assignee" | "tc" | "generated" | "validated";
 
@@ -521,10 +521,10 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
       if (status && t.status !== status) return false;
       if (type && t.issue_type !== type) return false;
       const s = teamStatus[t.key];
-      if (slice === "no-tc" && t.tc_tickets.length > 0) return false;
-      if (slice === "no-generated" && s?.generated_tcs === "Yes") return false;
-      if (slice === "not-validated" && s?.validated === "Yes") return false;
-      if (slice === "no-runs" && (s?.included_in_runs ?? "") !== "") return false;
+      if (slice === "has-tc" && t.tc_tickets.length === 0) return false;
+      if (slice === "generated" && s?.generated_tcs !== "Yes") return false;
+      if (slice === "validated" && s?.validated !== "Yes") return false;
+      if (slice === "in-runs" && (s?.included_in_runs ?? "") === "") return false;
       if (!q) return true;
       return [t.key, t.summary, t.assignee, ...t.labels].some((v) => v.toLowerCase().includes(q));
     });
@@ -654,34 +654,34 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
             />
             <Tile
               label="TC ticket linked" value={stats.withTc} of={stats.total}
-              note={`${stats.total - stats.withTc} missing · click to list`}
+              note={`${stats.total - stats.withTc} missing · click to list those with a TC`}
               segments={[{ pct: pct(stats.withTc), color: "bg-emerald-400/80" }]}
-              active={slice === "no-tc"} onClick={() => toggleSlice("no-tc")}
+              active={slice === "has-tc"} onClick={() => toggleSlice("has-tc")}
             />
             <Tile
               label="Generated TCs" value={stats.generated} of={stats.total}
-              note={`${stats.total - stats.generated} still to generate`}
+              note={`${stats.total - stats.generated} still to generate · click to list generated`}
               segments={[
                 { pct: pct(stats.generated), color: "bg-emerald-400/80" },
                 { pct: pct(stats.generatedWip), color: "bg-amber-400/80" },
               ]}
-              active={slice === "no-generated"} onClick={() => toggleSlice("no-generated")}
+              active={slice === "generated"} onClick={() => toggleSlice("generated")}
             />
             <Tile
               label="Validated in device" value={stats.validated} of={stats.total}
-              note={`${stats.total - stats.validated} not validated · click to list`}
+              note={`${stats.total - stats.validated} not validated · click to list validated`}
               segments={[
                 { pct: pct(stats.validated), color: "bg-emerald-400/80" },
                 { pct: pct(stats.validatedPartial), color: "bg-amber-400/80" },
                 { pct: pct(stats.validatedNo), color: "bg-red-400/70" },
               ]}
-              active={slice === "not-validated"} onClick={() => toggleSlice("not-validated")}
+              active={slice === "validated"} onClick={() => toggleSlice("validated")}
             />
             <Tile
               label="Included in runs" value={stats.inRuns} of={stats.total}
-              note={`${stats.total - stats.inRuns} not in a run yet`}
+              note={`${stats.total - stats.inRuns} not in a run yet · click to list those in runs`}
               segments={[{ pct: pct(stats.inRuns), color: "bg-sky-400/80" }]}
-              active={slice === "no-runs"} onClick={() => toggleSlice("no-runs")}
+              active={slice === "in-runs"} onClick={() => toggleSlice("in-runs")}
             />
           </div>
 
