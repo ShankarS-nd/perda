@@ -28,6 +28,7 @@ Build Log endpoints:
 
 Release Tickets endpoint:
   GET  /release-tickets       → Jira tickets of a fix version/sprint with their TC tickets and team status
+  GET  /release-tickets/prs     → pull requests per ticket key (loaded after the table)
   GET  /release-tickets/options → fix versions and sprints for the page's dropdowns
   GET  /ticket-status         → the team-entered status of every ticket (polled so edits show live)
   PUT  /ticket-status/{key}   → set one status column of a ticket
@@ -503,6 +504,18 @@ async def release_tickets(
         "jql": jira_tickets.build_jql(fix_version, project, sprint),
         "status": get_ticket_statuses(),
     }
+
+
+@app.get("/release-tickets/prs")
+async def release_ticket_prs(keys: str = Query(..., description="Comma-separated ticket keys from a recent /release-tickets call")):
+    """Pull requests per ticket. Split from /release-tickets so the table can show up at once."""
+    import jira_tickets
+
+    wanted = [k.strip() for k in keys.split(",") if k.strip()][:500]
+    try:
+        return await asyncio.to_thread(jira_tickets.fetch_prs, wanted)
+    except jira_tickets.JiraError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
 
 
 @app.get("/ticket-status")

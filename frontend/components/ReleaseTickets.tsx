@@ -26,7 +26,6 @@ interface Ticket {
   assignee: string;
   labels: string[];
   tc_tickets: string[];
-  prs: PullRequest[] | null; // null: Jira could not report PRs for this ticket
 }
 
 interface PullRequest {
@@ -45,6 +44,38 @@ const PR_STYLE: Record<string, string> = {
   DECLINED: "bg-red-500/10 text-red-300 ring-red-500/25",
   DRAFT: "bg-amber-500/10 text-amber-300 ring-amber-500/25",
 };
+/** undefined: still loading · null: Jira could not report PRs · []: none. */
+type PrMap = Record<string, PullRequest[] | null | undefined>;
+
+type PrFilter = "" | "has" | "none" | "all-merged" | "open";
+const PR_FILTERS: { value: PrFilter; label: string }[] = [
+  { value: "", label: "All PRs" },
+  { value: "has", label: "Has a PR" },
+  { value: "none", label: "No PR" },
+  { value: "all-merged", label: "All PRs merged" },
+  { value: "open", label: "Open / draft PR" },
+];
+
+function matchesPr(prs: PullRequest[] | null | undefined, f: PrFilter): boolean {
+  if (!f) return true;
+  if (!prs) return false; // not loaded or unavailable: can't claim a match
+  switch (f) {
+    case "has": return prs.length > 0;
+    case "none": return prs.length === 0;
+    case "all-merged": return prs.length > 0 && prs.every((p) => p.status === "MERGED");
+    case "open": return prs.some((p) => p.status === "OPEN" || p.status === "DRAFT");
+  }
+}
+
+// Filters live in the address bar so a link or a refresh reopens the same view.
+const URL_KEYS = { search: "rt_q", status: "rt_status", type: "rt_type", slice: "rt_tile", pr: "rt_pr", version: "rt_v", sprint: "rt_s" } as const;
+function urlParam(name: string): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(name) ?? "";
+}
+const SLICES: Slice[] = ["has-tc", "generated", "validated", "in-runs"];
+const PR_VALUES = PR_FILTERS.map((f) => f.value);
+
 const PR_LABEL: Record<string, string> = { MERGED: "Merged", OPEN: "Open", DECLINED: "Closed", DRAFT: "Draft" };
 
 interface VersionOption { id: string; name: string; released: boolean }
@@ -315,7 +346,14 @@ function Th({
 
 export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partial<Query> }) {
   const [query, setQuery] = useState<Query>(() =>
-    typeof window === "undefined" ? DEFAULT_QUERY : { ...loadQuery(), ...initialQuery }
+    typeof window === "undefined"
+      ? DEFAULT_QUERY
+      : {
+          ...loadQuery(),
+          ...(urlParam(URL_KEYS.version) && { fixVersion: urlParam(URL_KEYS.version) }),
+          ...(urlParam(URL_KEYS.version) && { sprint: urlParam(URL_KEYS.sprint) }),
+          ...initialQuery,
+        }
   );
   const [options, setOptions] = useState<{ versions: VersionOption[]; sprints: SprintOption[] } | null>(null);
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
@@ -324,10 +362,18 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [type, setType] = useState("");
-  const [slice, setSlice] = useState<Slice>("");
+  const [prMap, setPrMap] = useState<PrMap>({});
+  // Filters start from the address bar. A reload re-applies them once, after the tickets arrive.
+  const urlFilters = useRef({
+    search: urlParam(URL_KEYS.search), status: urlParam(URL_KEYS.status), type: urlParam(URL_KEYS.type),
+    slice: urlParam(URL_KEYS.slice), pr: urlParam(URL_KEYS.pr),
+  });
+  const keepUrlFilters = useRef(true);
+  const [search, setSearch] = useState(urlFilters.current.search);
+  const [status, setStatus] = useState(urlFilters.current.status);
+  const [type, setType] = useState(urlFilters.current.type);
+  const [slice, setSlice] = useState<Slice>(SLICES.includes(urlFilters.current.slice as Slice) ? (urlFilters.current.slice as Slice) : "");
+  const [prFilter, setPrFilter] = useState<PrFilter>(PR_VALUES.includes(urlFilters.current.pr as PrFilter) ? (urlFilters.current.pr as PrFilter) : "");
   const [sort, setSort] = useState<{ col: SortKey; dir: 1 | -1 } | null>(null);
 
   // Live-sync bookkeeping.
@@ -343,6 +389,28 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
   const field = (key: string, f: StatusField) => teamStatus[key]?.[f] ?? "";
 
   // ---- loading ------------------------------------------------------------
+
+  // Pull requests arrive after the table: one Jira call per ticket is slow, and nobody should wait on it.
+  const prRun = useRef(0);
+  const loadPrs = useCallback(async (keys: string[], retry = false) => {
+    // A retry of one ticket must not cancel (or reset) a release-wide load in progress.
+    const run = retry ? prRun.current : ++prRun.current;
+    if (!retry) setPrMap((m) => Object.fromEntries(keys.map((k) => [k, m[k]]))); // keep known values while re-fetching
+    else setPrMap((m) => ({ ...m, ...Object.fromEntries(keys.map((k) => [k, undefined])) }));
+    for (let i = 0; i < keys.length; i += 25) {
+      const chunk = keys.slice(i, i + 25);
+      let got: Record<string, PullRequest[] | null>;
+      try {
+        const res = await fetch(`${API_BASE}/release-tickets/prs?keys=${encodeURIComponent(chunk.join(","))}`);
+        if (!res.ok) throw new Error();
+        got = await res.json();
+      } catch {
+        got = Object.fromEntries(chunk.map((k) => [k, null]));
+      }
+      if (run !== prRun.current) return; // another release was loaded meanwhile
+      setPrMap((m) => ({ ...m, ...got }));
+    }
+  }, []);
 
   const load = useCallback(async (q: Query) => {
     if (!q.fixVersion.trim()) {
@@ -370,14 +438,17 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
       setJql(body.jql ?? "");
       setLastSync(Date.now());
       setSyncOk(true);
-      setStatus(""); setType(""); setSearch(""); setSlice("");
+      // First load of the page keeps the filters from the link; picking another release resets them.
+      if (keepUrlFilters.current) keepUrlFilters.current = false;
+      else { setStatus(""); setType(""); setSearch(""); setSlice(""); setPrFilter(""); }
+      loadPrs(body.tickets.map((t: Ticket) => t.key));
     } catch (e) {
       setTickets(null);
       setError(e instanceof Error ? e.message : "Could not load tickets");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadPrs]);
 
   // What the two dropdowns offer, straight from Jira.
   useEffect(() => {
@@ -525,6 +596,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
       if (slice === "generated" && s?.generated_tcs !== "Yes") return false;
       if (slice === "validated" && s?.validated !== "Yes") return false;
       if (slice === "in-runs" && (s?.included_in_runs ?? "") === "") return false;
+      if (!matchesPr(prMap[t.key], prFilter)) return false;
       if (!q) return true;
       return [t.key, t.summary, t.assignee, ...t.labels].some((v) => v.toLowerCase().includes(q));
     });
@@ -543,14 +615,14 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
       const x = val(a), y = val(b);
       return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
     });
-  }, [tickets, teamStatus, search, status, type, slice, sort]);
+  }, [tickets, teamStatus, prMap, prFilter, search, status, type, slice, sort]);
 
   const toggleSort = (col: SortKey) =>
     setSort((s) => (s?.col !== col ? { col, dir: 1 } : s.dir === 1 ? { col, dir: -1 } : null));
 
   const toggleSlice = (s: Slice) => setSlice((cur) => (cur === s ? "" : s));
-  const filtered = !!(search || status || type || slice);
-  const clearFilters = () => { setSearch(""); setStatus(""); setType(""); setSlice(""); };
+  const filtered = !!(search || status || type || slice || prFilter);
+  const clearFilters = () => { setSearch(""); setStatus(""); setType(""); setSlice(""); setPrFilter(""); };
 
   // Sprints are named after their release ("x.6.19_Sprint1" for "x.6.19.rc.1"),
   // so the ones for the chosen fix version go first.
@@ -562,6 +634,17 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
   const otherVersions = (options?.versions ?? []).filter((v) => !releaseBuilds.includes(v));
 
   const pct = (n: number) => (stats.total ? (n / stats.total) * 100 : 0);
+
+  // Mirror the view into the address bar (replace, not push, so Back still leaves the page).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const u = new URL(window.location.href);
+    const set = (k: string, v: string) => (v ? u.searchParams.set(k, v) : u.searchParams.delete(k));
+    set(URL_KEYS.search, search); set(URL_KEYS.status, status); set(URL_KEYS.type, type);
+    set(URL_KEYS.slice, slice); set(URL_KEYS.pr, prFilter);
+    set(URL_KEYS.version, query.fixVersion); set(URL_KEYS.sprint, query.sprint);
+    if (u.href !== window.location.href) window.history.replaceState(null, "", u);
+  }, [search, status, type, slice, prFilter, query.fixVersion, query.sprint]);
 
   // ---- render -------------------------------------------------------------
 
@@ -727,6 +810,9 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                 <option value="">All statuses</option>
                 {jiraStatuses.map((s) => <option key={s}>{s}</option>)}
               </select>
+              <select value={prFilter} onChange={(e) => setPrFilter(e.target.value as PrFilter)} aria-label="Pull requests" className="ds-input !rounded-full !py-2 !text-[13px]">
+                {PR_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
               {filtered && (
                 <button onClick={clearFilters} className="rounded-full px-3 py-1.5 text-[12px] font-medium text-indigo-300 transition-colors hover:bg-indigo-500/10">
                   Clear filters
@@ -827,11 +913,13 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                             )}
                           </td>
                           <td className="!px-3">
-                            {t.prs === null ? (
-                              <span className="text-[11.5px] text-gray-600" title="Jira did not return PR data">Unavailable</span>
-                            ) : t.prs.length === 0 ? <Dash /> : (
+                            {prMap[t.key] === undefined ? (
+                              <span className="inline-block h-3 w-16 animate-pulse rounded bg-white/[0.06]" aria-label="Loading pull requests" />
+                            ) : prMap[t.key] === null ? (
+                              <button onClick={() => loadPrs([t.key], true)} title="Jira did not return PR data — click to retry" className="text-[11.5px] text-amber-300/80 hover:underline">Unavailable · retry</button>
+                            ) : prMap[t.key]!.length === 0 ? <Dash /> : (
                               <div className="flex min-w-[170px] flex-col gap-1">
-                                {t.prs.map((pr) => (
+                                {prMap[t.key]!.map((pr) => (
                                   <div key={pr.url || pr.id} className="flex items-center gap-1.5 text-[12px]">
                                     <Pill className={PR_STYLE[pr.status] ?? "bg-white/[0.05] text-gray-300 ring-white/[0.08]"}>
                                       {PR_LABEL[pr.status] ?? (pr.status || "Unknown")}

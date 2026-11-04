@@ -95,7 +95,11 @@ def _shape(issue: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_tickets(fix_version: str, project: str = DEFAULT_PROJECT, sprint: str = "") -> list[dict[str, Any]]:
-    """Every ticket matching the fix version / project / sprint, shaped for the table."""
+    """Every ticket matching the fix version / project / sprint, shaped for the table.
+
+    Pull requests are not included: they cost one Jira call per ticket, so the page
+    asks for them separately (fetch_prs) and fills the column in as they arrive.
+    """
     jql = build_jql(fix_version, project, sprint)
     tickets: list[dict[str, Any]] = []
     token: str | None = None
@@ -128,9 +132,8 @@ def fetch_tickets(fix_version: str, project: str = DEFAULT_PROJECT, sprint: str 
         if not token or data.get("isLast"):
             break
 
-    _attach_prs(tickets)
     for t in tickets:
-        t.pop("id", None)
+        _issue_ids[t["key"]] = t.pop("id", "")
     return tickets
 
 
@@ -139,6 +142,7 @@ def fetch_tickets(fix_version: str, project: str = DEFAULT_PROJECT, sprint: str 
 # ---------------------------------------------------------------------------
 
 _PR_TTL = 60
+_issue_ids: dict[str, str] = {}  # ticket key → Jira's numeric id, which the dev-status API needs
 _pr_cache: dict[str, tuple[float, list[dict[str, Any]] | None]] = {}
 
 
@@ -175,11 +179,38 @@ def _fetch_prs(issue_id: str) -> list[dict[str, Any]] | None:
     return prs
 
 
-def _attach_prs(tickets: list[dict[str, Any]]) -> None:
+def _resolve_ids(keys: list[str]) -> None:
+    """Look up Jira's numeric ids for keys this process has not seen (the page's two
+    requests can land on different server workers)."""
+    for n in range(0, len(keys), _PAGE):
+        chunk = keys[n:n + _PAGE]
+        resp = requests.post(
+            f"{JIRA_BASE_URL}/rest/api/3/search/jql",
+            json={"jql": "key in (" + ",".join(_quote(k) for k in chunk) + ")", "fields": ["summary"], "maxResults": _PAGE},
+            auth=_auth(), timeout=30, headers={"Accept": "application/json"},
+        )
+        if resp.ok:
+            for issue in resp.json().get("issues", []):
+                _issue_ids[issue["key"]] = issue["id"]
+
+
+_KEY_RE = re.compile(r"^[A-Z][A-Z0-9]*-\d+$")
+
+
+def fetch_prs(keys: list[str]) -> dict[str, list[dict[str, Any]] | None]:
+    """PRs for the given ticket keys (None per key where Jira could not say)."""
     _auth()  # fail with the friendly message before fanning out
+    keys = [k for k in dict.fromkeys(keys) if _KEY_RE.match(k)]
+    missing = [k for k in keys if k not in _issue_ids]
+    if missing:
+        try:
+            _resolve_ids(missing)
+        except requests.RequestException:
+            pass
+    known = [k for k in keys if _issue_ids.get(k)]
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for t, prs in zip(tickets, pool.map(lambda t: _fetch_prs(t["id"]), tickets)):
-            t["prs"] = prs
+        out = dict(zip(known, pool.map(lambda k: _fetch_prs(_issue_ids[k]), known)))
+    return {k: out.get(k) for k in keys}
 
 
 # ---------------------------------------------------------------------------
