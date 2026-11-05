@@ -518,6 +518,118 @@ async def release_ticket_prs(keys: str = Query(..., description="Comma-separated
         raise HTTPException(status_code=exc.status, detail=str(exc))
 
 
+# ---------------------------------------------------------------------------
+# Release Notes Sync — build (never send) what goes into the release notes' Reports section
+# ---------------------------------------------------------------------------
+
+@app.get("/release-sync/devices")
+async def release_sync_devices():
+    """Release-notes product lines and the dashboard platform each maps to."""
+    import release_sync
+    return {"devices": release_sync.devices()}
+
+
+class ReleaseSyncSummaryRequest(BaseModel):
+    device: str
+    rc1_url: str
+    rc2_url: str
+    dashboard_url: str = ""
+    force_refresh: bool = False
+
+
+@app.post("/release-sync/summary")
+async def release_sync_summary(payload: ReleaseSyncSummaryRequest):
+    """Compare two Jenkins reports for one device and return its `testAutomationSummary` entry."""
+    import release_sync
+
+    try:
+        platform = release_sync.platform_for(payload.device)
+    except release_sync.SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    if not payload.rc1_url.strip() or not payload.rc2_url.strip():
+        raise HTTPException(status_code=400, detail="Both Jenkins report URLs are required.")
+
+    report = await test_report_summary(TestReportRequest(
+        rc1_url=payload.rc1_url.strip(), rc2_url=payload.rc2_url.strip(),
+        platform=platform, force_refresh=payload.force_refresh,
+    ))
+    return {
+        "device": payload.device,
+        "platform": platform,
+        "summary": release_sync.shape_summary(
+            report, payload.rc1_url.strip(), payload.rc2_url.strip(), payload.dashboard_url.strip(),
+        ),
+    }
+
+
+@app.get("/release-sync/refs")
+async def release_sync_refs(
+    edition: str = Query(..., description="Release, e.g. x.6.17"),
+    rc: str = Query(..., description="RC, e.g. x.6.17.rc.2"),
+    device: str = Query("D450_US", description="Product line whose tags are used"),
+    project: str = Query("DT"),
+):
+    """Default repo/base/head for the change log: previous RC's tags → this RC's tags, from the release notes."""
+    import release_sync
+    try:
+        return await asyncio.to_thread(release_sync.default_refs, edition.strip(), rc.strip(), device.strip(), project.strip())
+    except release_sync.SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+class ChangelogRef(BaseModel):
+    repo: str
+    base: str = ""
+    head: str = ""
+
+
+class ReleaseSyncChangelogRequest(BaseModel):
+    refs: list[ChangelogRef]
+
+
+@app.post("/release-sync/changelog")
+async def release_sync_changelog(payload: ReleaseSyncChangelogRequest):
+    """Commits between each repo's base and head (GitHub compare), rendered as change-log text."""
+    import release_sync
+
+    token = os.getenv("GITHUB_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured on server.")
+    refs = [r for r in payload.refs if r.repo.strip()][:20]
+    if not refs:
+        raise HTTPException(status_code=400, detail="Add at least one repo.")
+    try:
+        results = await asyncio.gather(*[
+            asyncio.to_thread(release_sync.fetch_compare, r.repo.strip(), r.base.strip(), r.head.strip(), token)
+            for r in refs
+        ])
+    except release_sync.SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    text = release_sync.format_changelog(list(results))
+    return {"text": text, "length": len(text), "limit": release_sync.CHANGELOG_LIMIT, "repos": results}
+
+
+class ReleaseSyncDryRunRequest(BaseModel):
+    edition: str
+    rc: str
+    project: str = "DT"
+    summaries: dict[str, Any] = {}
+    changelog: str = ""
+
+
+@app.post("/release-sync/dry-run")
+async def release_sync_dry_run(payload: ReleaseSyncDryRunRequest):
+    """The exact request a push would make. Nothing is sent — authentication is not set up yet."""
+    import release_sync
+    try:
+        return release_sync.build_dry_run(
+            payload.edition.strip(), payload.rc.strip(), payload.project.strip(),
+            payload.summaries, payload.changelog,
+        )
+    except release_sync.SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
 @app.get("/ticket-status")
 async def ticket_status_list():
     """Everything the team has entered. Cheap, so the page polls it for live edits."""

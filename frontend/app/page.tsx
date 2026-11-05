@@ -12,6 +12,7 @@ import TCAnalysis from "@/components/TCAnalysis";
 import ReviewBench from "@/components/ReviewBench";
 import BuildLog from "@/components/BuildLog";
 import ReleaseTickets from "@/components/ReleaseTickets";
+import ReleaseSync from "@/components/ReleaseSync";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +44,7 @@ type Page =
   | "history"
   | "build-log"
   | "release-tickets"
+  | "release-sync"
   | "workflows"
   | "workflow-runs";
 
@@ -75,6 +77,7 @@ const PAGE_META: PageMeta[] = [
   // Last so the Alt+number order of the pages above stays as it was.
   { key: "build-log", label: "Build Log", description: "Results of every successful Test_Automation_Parallel build", icon: BuildLogIcon, section: "Core" },
   { key: "release-tickets", label: "Release Tickets", description: "Jira tickets of a release with their test coverage", icon: ReleaseTicketsIcon, section: "Core" },
+  { key: "release-sync", label: "Release Notes Sync", description: "Prepare test results and change log for the release notes", icon: ReleaseTicketsIcon, section: "Core" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -473,6 +476,15 @@ export default function Home() {
             collapsed={sidebarCollapsed}
           />
 
+          {/* Release Notes Sync */}
+          <SidebarItem
+            label="Release Notes Sync"
+            icon={<ReleaseTicketsIcon />}
+            active={activePage === "release-sync"}
+            onClick={() => navigateTo("release-sync")}
+            collapsed={sidebarCollapsed}
+          />
+
           {/* Workflows section */}
           <div className="pt-4 mt-3 border-t border-white/[0.04]">
             {!sidebarCollapsed && (
@@ -657,7 +669,7 @@ export default function Home() {
             className={
               activePage === "workflows"
                 ? "p-4"
-                : activePage === "review-bench" || activePage === "release-tickets"
+                : activePage === "review-bench" || activePage === "release-tickets" || activePage === "release-sync"
                 // Testcase source runs to ~200 columns, and the ticket table has a
                 // dozen; the 1440px measure that suits prose pages forces sideways
                 // scrolling, so these take the window.
@@ -687,6 +699,7 @@ export default function Home() {
                 {activePage === "history" && <RunHistory />}
                 {activePage === "build-log" && <BuildLog />}
                 {activePage === "release-tickets" && <ReleaseTickets />}
+                {activePage === "release-sync" && <ReleaseSync />}
                 {activePage === "workflows" && <WorkflowBuilder />}
                 {activePage === "workflow-runs" && <WorkflowExecution />}
               </motion.div>
