@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -43,16 +44,12 @@ DEVICE_MAP: dict[str, str | None] = {
     "D810_US": None,
 }
 
-# Tag keys in a product line's `buildBranches` → GitHub repo.
-TAG_REPOS = {
-    "ND_CORE_UTILS_TAG": "nd_core_utils",
-    "ND_DEVICE_SERVICES_TAG": "nd_device_services",
-    "SHIELD_TAG": "shield",
-    "ND_CONNECTION_MGR_TAG": "nd_connection_mgr",
-    "ND_VDM_TAG": "nd_vdm",
-    "ND_AUDIO_FILES_TAG": "nd_audio_files",
-    "DEVICE_BUILD_TAG": "device-build",
-}
+# The change log covers the test automation repo only — what changed in the tests between
+# two releases — not the product repos.
+CHANGELOG_REPO = os.getenv("CHANGELOG_REPO", "nd_test_bot")
+MAX_BRANCHES = 5000              # nd_test_bot has >1,200 branches; listing them takes ~8 s
+BRANCH_CACHE_SEC = 300
+_branch_cache: dict[str, Any] = {}
 
 _JIRA_KEY = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
 
@@ -156,66 +153,55 @@ def shape_summary(
 
 
 # ---------------------------------------------------------------------------
-# Default refs from the release-notes app
+# Release / RC / project choices from the release-notes app
 # ---------------------------------------------------------------------------
 
-def previous_rc(rc: str) -> str | None:
-    """x.6.17.rc.2 → x.6.17.rc.1; the first RC has no previous one."""
-    m = re.match(r"^(.*\.rc\.)(\d+)$", rc.strip())
-    if not m or int(m.group(2)) <= 1:
-        return None
-    return f"{m.group(1)}{int(m.group(2)) - 1}"
+def _rc_number(rc: str) -> int:
+    m = re.search(r"\.rc\.(\d+)$", rc)
+    return int(m.group(1)) if m else -1
 
 
-def parse_tags(build_branches: str) -> dict[str, str]:
-    """'ND_CORE_UTILS_TAG=5.6.17.rc.1\\nSHIELD_TAG=…' → {repo: ref} for the tracked repos."""
-    out: dict[str, str] = {}
-    for line in (build_branches or "").splitlines():
-        key, _, value = line.partition("=")
-        repo = TAG_REPOS.get(key.strip())
-        if repo and value.strip():
-            out[repo] = value.strip()
-    return out
+def is_special(rc: str) -> bool:
+    """Special packages ('85.3.67.sp.5.6.14.rc.3_VDR4') are not plain release candidates."""
+    return ".sp." in rc or _rc_number(rc) < 0
 
 
-def _product_line(rc_detail: dict, device: str) -> dict:
-    lines = (rc_detail.get("overviewDetails") or {}).get("productLines") or []
-    return next((p for p in lines if p.get("name") == device), {})
+def shape_releases(raw: list[dict]) -> dict:
+    """{projects: [{key, releases: [{version, name, rcs: [{rc, date, status, special}]}]}]}.
+
+    RCs are newest first with special packages last, so the first entry is the one to
+    preselect; releases keep the release-notes app's own order."""
+    by_project: dict[str, dict[str, dict]] = {}
+    for rel in raw:
+        for rc in rel.get("rcs") or []:
+            key = rc.get("projectKey") or ""
+            if not key or not rc.get("rcVersion"):
+                continue
+            version = rel.get("version", "")
+            entry = by_project.setdefault(key, {}).setdefault(
+                version, {"version": version, "name": rel.get("name", version), "rcs": []},
+            )
+            entry["rcs"].append({
+                "rc": rc["rcVersion"], "date": rc.get("date", ""),
+                "status": rc.get("status", ""), "special": is_special(rc["rcVersion"]),
+            })
+    projects = []
+    for key in sorted(by_project):
+        releases = list(by_project[key].values())
+        for rel in releases:
+            rel["rcs"].sort(key=lambda r: (r["special"], -_rc_number(r["rc"])))
+        projects.append({"key": key, "releases": releases})
+    return {"projects": projects}
 
 
-def refs_from_details(prev_detail: dict | None, cur_detail: dict | None, device: str) -> list[dict]:
-    """[{repo, base, head}] — blank where the release notes do not have the tag yet."""
-    prev = parse_tags(_product_line(prev_detail or {}, device).get("buildBranches", ""))
-    cur = parse_tags(_product_line(cur_detail or {}, device).get("buildBranches", ""))
-    return [
-        {"repo": repo, "base": prev.get(repo, ""), "head": cur.get(repo, "")}
-        for repo in TAG_REPOS.values()
-    ]
-
-
-def _fetch_rc_detail(edition: str, rc: str, project: str, get=requests.get) -> dict | None:
-    resp = get(
-        f"{RELEASE_NOTES_URL}/api/releases/{edition}/{rc}",
-        params={"project": project} if project else None,
-        timeout=30,
-    )
-    if resp.status_code == 404:
-        return None
-    if not resp.ok:
-        raise SyncError(f"Release notes returned HTTP {resp.status_code} for {rc}.")
-    return resp.json()
-
-
-def default_refs(edition: str, rc: str, device: str, project: str = "DT", get=requests.get) -> dict:
-    prev_rc = previous_rc(rc)
+def fetch_releases(get=requests.get) -> dict:
     try:
-        cur = _fetch_rc_detail(edition, rc, project, get)
-        prev = _fetch_rc_detail(edition, prev_rc, project, get) if prev_rc else None
+        resp = get(f"{RELEASE_NOTES_URL}/api/releases", timeout=30)
     except requests.RequestException as exc:
         raise SyncError(f"Could not reach the release-notes app: {exc}") from exc
-    if cur is None:
-        raise SyncError(f"Release notes have no RC '{rc}' under {edition}.", 404)
-    return {"previous_rc": prev_rc, "refs": refs_from_details(prev, cur, device)}
+    if not resp.ok:
+        raise SyncError(f"Release notes returned HTTP {resp.status_code}.")
+    return shape_releases(resp.json())
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +210,39 @@ def default_refs(edition: str, rc: str, device: str, project: str = "DT", get=re
 
 def _gh_headers(token: str) -> dict:
     return {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
+
+
+def list_branches(token: str, repo: str = CHANGELOG_REPO, get=requests.get, now=time.time) -> list[str]:
+    """Branch names of the change-log repo, for the base/head pickers (cached for a few minutes)."""
+    cached = _branch_cache.get(repo)
+    if cached and now() - cached[0] < BRANCH_CACHE_SEC:
+        return list(cached[1])
+    names: list[str] = []
+    page = 1
+    while len(names) < MAX_BRANCHES:
+        try:
+            resp = get(
+                f"https://api.github.com/repos/{GITHUB_ORG}/{repo}/branches",
+                headers=_gh_headers(token), params={"per_page": 100, "page": page}, timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise SyncError(f"GitHub request failed: {exc}") from exc
+        if resp.status_code == 401:
+            raise SyncError("GitHub rejected GITHUB_TOKEN (bad or expired credentials). Update it in backend/.env.", 502)
+        if resp.status_code == 403:
+            raise SyncError("GitHub refused the token for this repo (403). Check the token's scope, SSO authorization and expiry (the org allows 90 days at most).", 502)
+        if resp.status_code == 404:
+            raise SyncError(f"Repo {GITHUB_ORG}/{repo} not found, or the token cannot see it.", 404)
+        if not resp.ok:
+            raise SyncError(f"GitHub returned HTTP {resp.status_code}.")
+        batch = [b.get("name", "") for b in resp.json()]
+        names.extend(n for n in batch if n)
+        if len(batch) < 100:
+            break
+        page += 1
+    names = names[:MAX_BRANCHES]
+    _branch_cache[repo] = (now(), names)
+    return list(names)
 
 
 def fetch_compare(

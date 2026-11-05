@@ -562,51 +562,59 @@ async def release_sync_summary(payload: ReleaseSyncSummaryRequest):
     }
 
 
-@app.get("/release-sync/refs")
-async def release_sync_refs(
-    edition: str = Query(..., description="Release, e.g. x.6.17"),
-    rc: str = Query(..., description="RC, e.g. x.6.17.rc.2"),
-    device: str = Query("D450_US", description="Product line whose tags are used"),
-    project: str = Query("DT"),
-):
-    """Default repo/base/head for the change log: previous RC's tags → this RC's tags, from the release notes."""
+@app.get("/release-sync/releases")
+async def release_sync_releases():
+    """Projects → releases → RCs to choose from, read from the release-notes app."""
     import release_sync
     try:
-        return await asyncio.to_thread(release_sync.default_refs, edition.strip(), rc.strip(), device.strip(), project.strip())
+        return await asyncio.to_thread(release_sync.fetch_releases)
     except release_sync.SyncError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
 
 
-class ChangelogRef(BaseModel):
-    repo: str
-    base: str = ""
-    head: str = ""
-
-
-class ReleaseSyncChangelogRequest(BaseModel):
-    refs: list[ChangelogRef]
-
-
-@app.post("/release-sync/changelog")
-async def release_sync_changelog(payload: ReleaseSyncChangelogRequest):
-    """Commits between each repo's base and head (GitHub compare), rendered as change-log text."""
+@app.get("/release-sync/branches")
+async def release_sync_branches():
+    """Branches of the change-log repo (nd_test_bot), for the base/head pickers."""
     import release_sync
 
     token = os.getenv("GITHUB_TOKEN", "")
     if not token:
         raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured on server.")
-    refs = [r for r in payload.refs if r.repo.strip()][:20]
-    if not refs:
-        raise HTTPException(status_code=400, detail="Add at least one repo.")
     try:
-        results = await asyncio.gather(*[
-            asyncio.to_thread(release_sync.fetch_compare, r.repo.strip(), r.base.strip(), r.head.strip(), token)
-            for r in refs
-        ])
+        names = await asyncio.to_thread(release_sync.list_branches, token)
     except release_sync.SyncError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc))
-    text = release_sync.format_changelog(list(results))
-    return {"text": text, "length": len(text), "limit": release_sync.CHANGELOG_LIMIT, "repos": results}
+    return {"repo": release_sync.CHANGELOG_REPO, "branches": names}
+
+
+class ReleaseSyncChangelogRequest(BaseModel):
+    base: str
+    head: str
+
+
+@app.post("/release-sync/changelog")
+async def release_sync_changelog(payload: ReleaseSyncChangelogRequest):
+    """Commits between two branches of nd_test_bot (GitHub compare), rendered as change-log text."""
+    import release_sync
+
+    token = os.getenv("GITHUB_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured on server.")
+    base, head = payload.base.strip(), payload.head.strip()
+    if not base or not head:
+        raise HTTPException(status_code=400, detail="Both a base and a head branch are required.")
+    try:
+        result = await asyncio.to_thread(release_sync.fetch_compare, release_sync.CHANGELOG_REPO, base, head, token)
+    except release_sync.SyncError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    if result["error"]:
+        raise HTTPException(status_code=502, detail=result["error"])
+    text = release_sync.format_changelog([result])
+    return {
+        "text": text, "length": len(text), "limit": release_sync.CHANGELOG_LIMIT,
+        "repo": result["repo"], "commits": len(result["commits"]), "total": result["total"],
+        "compare_url": result["compare_url"],
+    }
 
 
 class ReleaseSyncDryRunRequest(BaseModel):

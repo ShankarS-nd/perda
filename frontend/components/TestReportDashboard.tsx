@@ -25,7 +25,7 @@ interface TCEntry {
   linked?: string;
 }
 
-interface Overview {
+export interface Overview {
   total: number;
   pass: number;
   fail: number;
@@ -2129,7 +2129,7 @@ function DeltaTile({
   );
 }
 
-function VerdictStrip({
+export function VerdictStrip({
   prev, curr, rc1, rc2, regressions, fixed,
 }: {
   prev: Overview;

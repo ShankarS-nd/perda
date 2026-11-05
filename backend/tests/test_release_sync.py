@@ -98,54 +98,110 @@ def test_shape_summary_tolerates_an_empty_report():
     assert s["regressions"] == [] and s["comparison"]["fixed"] == 0 and s["overview"]["current"]["total"] == 0
 
 
-# ── refs from the release notes ────────────────────────────────────────────
+# ── releases / RCs / projects from the release notes ───────────────────────
 
-def test_previous_rc():
-    assert rs.previous_rc("x.6.17.rc.2") == "x.6.17.rc.1"
-    assert rs.previous_rc("x.6.17.rc.10") == "x.6.17.rc.9"
-    assert rs.previous_rc("x.6.17.rc.1") is None
-    assert rs.previous_rc("weird") is None
+RAW = [
+    {"version": "x.6.19", "name": "Release x.6.19", "rcs": [
+        {"rcVersion": "x.6.19.rc.1", "projectKey": "DT", "date": "2026-11-01", "status": "draft"}]},
+    {"version": "x.6.17", "name": "Release x.6.17", "rcs": [
+        {"rcVersion": "x.6.17.rc.1", "projectKey": "DT", "date": "2026-10-01", "status": "draft"},
+        {"rcVersion": "85.3.67.sp.5.6.17.rc.1_VDR4", "projectKey": "DT", "date": "", "status": "draft"},
+        {"rcVersion": "x.6.17.rc.10", "projectKey": "DT", "date": "", "status": "draft"},
+        {"rcVersion": "x.6.17.rc.2", "projectKey": "DT", "date": "2026-11-05", "status": "draft"},
+        {"rcVersion": "x.6.17.rc.1", "projectKey": "OCTO", "date": "", "status": "draft"},
+        {"rcVersion": "", "projectKey": "DT"},
+        {"rcVersion": "x.6.17.rc.3"},
+    ]},
+]
 
 
-def test_parse_tags_keeps_only_tracked_repos():
-    tags = rs.parse_tags("ND_CORE_UTILS_TAG=5.6.17.rc.1\nANALYTICS_TAG=a_b\nSHIELD_TAG=\nDEVICE_BUILD_TAG=dev_6.17")
-    assert tags == {"nd_core_utils": "5.6.17.rc.1", "device-build": "dev_6.17"}
+def test_is_special():
+    assert not rs.is_special("x.6.17.rc.2")
+    assert not rs.is_special("5.6.14.rc.3")
+    assert rs.is_special("85.3.67.sp.5.6.14.rc.3_VDR4")
+    assert rs.is_special("weird")
 
 
-def _detail(tags: str):
-    return {"overviewDetails": {"productLines": [{"name": "D450_US", "buildBranches": tags}]}}
+def test_shape_releases_groups_by_project_and_orders_rcs():
+    out = rs.shape_releases(RAW)
+    assert [p["key"] for p in out["projects"]] == ["DT", "OCTO"]
+    dt = out["projects"][0]
+    assert [r["version"] for r in dt["releases"]] == ["x.6.19", "x.6.17"]      # keeps the app's order
+    rcs = [r["rc"] for r in dt["releases"][1]["rcs"]]
+    assert rcs == ["x.6.17.rc.10", "x.6.17.rc.2", "x.6.17.rc.1", "85.3.67.sp.5.6.17.rc.1_VDR4"]
+    assert dt["releases"][1]["rcs"][0]["special"] is False and dt["releases"][1]["rcs"][-1]["special"] is True
+    octo = out["projects"][1]
+    assert [r["version"] for r in octo["releases"]] == ["x.6.17"] and octo["releases"][0]["rcs"][0]["rc"] == "x.6.17.rc.1"
 
 
-def test_refs_from_details_blank_where_tag_missing():
-    refs = rs.refs_from_details(_detail("SHIELD_TAG=5.6.17.rc.1"), _detail("SHIELD_TAG=5.6.17.rc.2"), "D450_US")
-    shield = next(r for r in refs if r["repo"] == "shield")
-    assert shield == {"repo": "shield", "base": "5.6.17.rc.1", "head": "5.6.17.rc.2"}
-    core = next(r for r in refs if r["repo"] == "nd_core_utils")
-    assert core["base"] == "" and core["head"] == ""
-    assert len(refs) == len(rs.TAG_REPOS)
-    assert rs.refs_from_details(None, None, "D450_US")[0]["base"] == ""
+def test_shape_releases_empty():
+    assert rs.shape_releases([]) == {"projects": []}
+
+
+def test_fetch_releases_ok_and_errors():
+    assert rs.fetch_releases(get=lambda *a, **k: _http(body=RAW))["projects"][0]["key"] == "DT"
+    with pytest.raises(rs.SyncError, match="HTTP 500"):
+        rs.fetch_releases(get=lambda *a, **k: _http(500))
+    def boom(*a, **k):
+        raise rs.requests.ConnectionError("down")
+    with pytest.raises(rs.SyncError, match="Could not reach"):
+        rs.fetch_releases(get=boom)
+
+
+# ── branches of the change-log repo ────────────────────────────────────────
+
+def test_changelog_repo_is_nd_test_bot():
+    assert rs.CHANGELOG_REPO == "nd_test_bot"
+
+
+def test_list_branches_paginates_and_hits_the_right_repo():
+    rs._branch_cache.clear()
+    pages = {1: [{"name": f"b{i}"} for i in range(100)], 2: [{"name": "last"}]}
+    urls = []
+
+    def get(url, headers=None, params=None, timeout=None):
+        urls.append(url)
+        return _http(body=pages[params["page"]])
+
+    names = rs.list_branches("tok", get=get)
+    assert len(names) == 101 and names[-1] == "last"
+    assert all(u.endswith("/repos/netradyne/nd_test_bot/branches") for u in urls)
+
+
+def test_list_branches_errors():
+    rs._branch_cache.clear()
+    with pytest.raises(rs.SyncError, match="rejected GITHUB_TOKEN"):
+        rs.list_branches("t", get=lambda *a, **k: _http(401))
+    with pytest.raises(rs.SyncError) as e:
+        rs.list_branches("t", get=lambda *a, **k: _http(404))
+    assert e.value.status == 404
+    with pytest.raises(rs.SyncError, match="403"):
+        rs.list_branches("t", get=lambda *a, **k: _http(403))
+
+
+def test_list_branches_is_cached_for_a_few_minutes_and_errors_are_not():
+    rs._branch_cache.clear()
+    calls = []
+
+    def get(url, headers=None, params=None, timeout=None):
+        calls.append(1)
+        return _http(body=[{"name": "a"}])
+
+    clock = [1000.0]
+    assert rs.list_branches("t", get=get, now=lambda: clock[0]) == ["a"]
+    assert rs.list_branches("t", get=get, now=lambda: clock[0] + 100) == ["a"] and len(calls) == 1
+    rs.list_branches("t", get=get, now=lambda: clock[0] + rs.BRANCH_CACHE_SEC + 1)
+    assert len(calls) == 2
+    rs._branch_cache.clear()
+    with pytest.raises(rs.SyncError):
+        rs.list_branches("t", get=lambda *a, **k: _http(401))
+    assert rs._branch_cache == {}
 
 
 def _http(status=200, body=None):
     r = mock.Mock(status_code=status, ok=status < 400)
     r.json.return_value = body if body is not None else {}
     return r
-
-
-def test_default_refs_reads_both_rcs_and_404s_on_unknown_rc():
-    def get(url, params=None, timeout=None):
-        if url.endswith("x.6.17.rc.1"):
-            return _http(body=_detail("SHIELD_TAG=old"))
-        if url.endswith("x.6.17.rc.2"):
-            return _http(body=_detail("SHIELD_TAG=new"))
-        return _http(404)
-
-    out = rs.default_refs("x.6.17", "x.6.17.rc.2", "D450_US", get=get)
-    assert out["previous_rc"] == "x.6.17.rc.1"
-    assert {"repo": "shield", "base": "old", "head": "new"} in out["refs"]
-    with pytest.raises(rs.SyncError) as e:
-        rs.default_refs("x.6.17", "x.6.17.rc.9", "D450_US", get=get)
-    assert e.value.status == 404
 
 
 # ── GitHub change log ──────────────────────────────────────────────────────
