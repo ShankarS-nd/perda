@@ -1073,3 +1073,30 @@ def test_detect_device_output_is_parsed_whether_indented_or_one_line():
     assert tw.parse_device_info('{"error": "x"}\n')["error"] == "x"
     assert tw.parse_device_info("warning\n{\"a\": 1}")["a"] == 1
     assert tw.parse_device_info("not json") is None
+
+
+def test_include_new_branch_custom_name_is_validated_and_kept():
+    base = {"stage": "include", "branch": "6.17_qa", "target": "new"}
+    p, _ = tj.clean_params("include", {"branch": "6.17_qa", "target": "new", "new_branch": "my/own-name"})
+    assert p == {"branch": "6.17_qa", "target": "new", "new_branch": "my/own-name"}
+    p, _ = tj.clean_params("include", {"branch": "6.17_qa", "target": "new"})
+    assert "new_branch" not in p                                                    # generated name
+    for bad in ("main", "origin/master", "6.17_qa", "bad name", "a..b"):
+        with pytest.raises(tj.JobError):
+            tj.clean_params("include", {"branch": "6.17_qa", "target": "new", "new_branch": bad})
+    p, _ = tj.clean_params("include", {"branch": "6.17_qa", "target": "existing", "confirm_push": True, "new_branch": "x"})
+    assert "new_branch" not in p                                                    # only for a new branch
+
+
+def test_include_new_branch_prompt_and_result_check(tmp_path, monkeypatch):
+    job = {"dt": "DT-1", "stage": "include", "id": "j1", "params": {"branch": "6.17_qa", "target": "new", "new_branch": "my-name"}}
+    prompt = tw.build_prompt(job, tmp_path / "r.json")
+    assert "base-branch=6.17_qa new-branch=my-name" in prompt and "do not add a suffix" in prompt
+    plain = dict(job, params={"branch": "6.17_qa", "target": "new"})
+    assert "new-branch=" not in tw.build_prompt(plain, tmp_path / "r.json")
+    monkeypatch.setattr(tw, "branch_on_origin", lambda *a, **k: True)
+    r = {"outcome": "pushed", "branch": "bugreg/DT-1-on-6.17_qa", "commit": "a" * 40, "summary": "x"}
+    st, _, msg, _ = tw.verify(tmp_path, job, r)
+    assert st == "failed" and "my-name" in msg                                       # asked for a name, got another
+    assert tw.verify(tmp_path, job, dict(r, branch="my-name"))[0] == "done"
+    assert tw.verify(tmp_path, plain, r)[0] == "done"                                # generated name: any valid branch

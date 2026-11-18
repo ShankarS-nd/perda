@@ -743,6 +743,19 @@ def precheck(root: Path, job: dict[str, Any], skill_dir: Path | None = None) -> 
     if stage == "include":
         if not valid_branch(params.get("branch", "")):
             return f"Not a branch name: {params.get('branch')!r}"
+        custom = params.get("new_branch", "")
+        if custom and params.get("target") != "existing":
+            if not valid_branch(custom) or custom.removeprefix("origin/").lower() in PROTECTED_BRANCHES:
+                return f"Not a usable name for the new branch: {custom!r}"
+            repo = root / "repos" / "nd_test_bot"
+            if repo.exists() and remote_sha(repo, custom):
+                return f"A branch called {custom} already exists on the remote. Choose another name, or use \"Into this branch\" to add to it."
+            if skill_dir is not None:
+                try:
+                    if "new-branch=<branch>" not in (skill_dir / "SKILL.md").read_text():
+                        return "The skill has no `new-branch=<branch>` form in its include stage yet."
+                except OSError:
+                    return f"No skill at {skill_dir}."
         if params.get("target") == "existing":
             if params["branch"].removeprefix("origin/").lower() in PROTECTED_BRANCHES:
                 return f"{params['branch']} is protected: the testcases are not pushed straight into it."
@@ -871,6 +884,12 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
             "(confirmed in the dashboard), not to create a new branch. Follow the skill's section "
             "\"Include into the given branch\" exactly: plain push, never force, only the validated testcase "
             "files and their main_db.xlsx rows, from a separate worktree. Report `\"branch\"` (that same branch) and "
+            "`\"commit\"` (the full sha you pushed)."))
+    if p.get("new_branch"):
+        return (head + f" base-branch={p['branch']} new-branch={p['new_branch']}" + common + (
+            f"\n\nThe user chose the name of the new branch: `{p['new_branch']}`. Create exactly that branch from "
+            f"`{p['branch']}` (the skill's `new-branch=` form of the include stage). If that name already exists on origin, "
+            "do not add a suffix and do not push: report `failed` and say so. Report `\"branch\"` as that exact name and "
             "`\"commit\"` (the full sha you pushed)."))
     return head + f" base-branch={p['branch']}" + common
 
@@ -1067,6 +1086,8 @@ def verify(root: Path, job: dict[str, Any], result: dict[str, Any],
             return "done", "pushed", summary or f"Pushed into {branch} ({commit[:9]})", result
         if outcome != "pushed" or not valid_branch(branch):
             return "failed", outcome, f"No new branch was reported. {summary}", result
+        if params.get("new_branch") and branch != params["new_branch"]:
+            return "failed", outcome, f"The new branch was asked to be called {params['new_branch']} but {branch} was reported. {summary}", result
         if branch == params.get("branch"):
             return "failed", outcome, "The reported branch is the base branch itself; a new branch is required.", result
         if not branch_on_origin(repo, branch, commit):

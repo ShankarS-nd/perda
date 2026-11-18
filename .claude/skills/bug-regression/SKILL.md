@@ -570,7 +570,7 @@ the claude CLI, one stage at a time, with arguments of this shape:
 
 ```
 dashboard-stage=<generate|validate|include|regenerate> ticket=<DT-XXXX> job=<id> result-file=<path>
-    [device=<id>] [unfixed-device=<id>] [base-branch=<branch> | target-branch=<branch>]
+    [device=<id>] [unfixed-device=<id>] [base-branch=<branch> [new-branch=<branch>] | target-branch=<branch>]
 ```
 
 **When `dashboard-stage=` is present, this section governs the run.** Do that one stage and
@@ -656,8 +656,12 @@ Every other rule stands: never push to `base-branch` or any existing branch (exc
 another repo, never change Jira.
 
 1. `cd repos/nd_test_bot && git fetch origin <base-branch>`. If the branch is not on origin: `failed`.
-2. New branch name: `bugreg/<ticket>-on-<base-branch with "/" replaced by "-">`. If that name
-   already exists on origin (`git ls-remote --heads origin <name>`), append `-2`, `-3`, ...
+2. New branch name: when the dashboard passes `new-branch=<branch>` the user chose the name: use
+   exactly that, with no prefix and no suffix. If it already exists on origin
+   (`git ls-remote --heads origin <name>`), do NOT add a suffix and push nothing: `failed`, "branch
+   <name> already exists". Never `main` or `master`, and never the same as `base-branch`.
+   Without `new-branch=`: `bugreg/<ticket>-on-<base-branch with "/" replaced by "-">`. If that name
+   already exists on origin, append `-2`, `-3`, ...
 3. Work in a separate worktree so the shared checkout is never switched, stashed or reset:
    `git worktree add -b <new-branch> <project-root>/out/<ticket>/.dashboard/wt_<job> origin/<base-branch>`
 4. Deploy each validated candidate into the worktree with the bundled script (it re-runs the

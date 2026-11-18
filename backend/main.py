@@ -779,6 +779,7 @@ class TcJobRequest(BaseModel):
     mode: str = ""                   # validate: fixed | unfixed | both
     target: str = ""                 # include: existing (push into the branch) | new (branch from it)
     confirm_push: bool = False       # include into an existing branch needs this
+    new_branch: str = ""             # include, target new: the user's own name for the new branch
     confirm_remove: bool = False     # remove from a branch needs this
     skip_device_checks: bool = False  # validate: run even if the device does not look right for its role
 

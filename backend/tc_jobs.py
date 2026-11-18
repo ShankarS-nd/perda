@@ -150,7 +150,17 @@ def clean_params(stage: str, raw: dict[str, Any]) -> tuple[dict[str, str], dict[
                                f"Create a new branch from it instead.")
             if not raw.get("confirm_push"):
                 raise JobError("Confirm that you want the testcases pushed directly into that branch.")
-        return {"branch": branch, "target": target}, {}
+        out = {"branch": branch, "target": target}
+        custom = get("new_branch")
+        if target == "new" and custom:               # the user's own name for the new branch
+            if not valid_branch(custom):
+                raise JobError("That is not a valid name for the new branch.")
+            if is_protected(custom):
+                raise JobError(f"{custom} is a protected name: choose another name for the new branch.")
+            if custom.removeprefix("origin/") == branch.removeprefix("origin/"):
+                raise JobError("The new branch needs a different name than the branch it starts from.")
+            out["new_branch"] = custom
+        return out, {}
     if stage == "remove":
         branch = get("branch")
         if not valid_branch(branch):

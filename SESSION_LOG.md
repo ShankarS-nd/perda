@@ -8,6 +8,15 @@ and the corrections made along the way. Newest session first. Keep entries short
 
 ---
 
+## 2026-11-18 — Verified Include/Remove on GitHub; custom name for a new branch
+- Real Include into an existing branch and Remove were run once on a throwaway branch of nd_test_bot (both
+  branches deleted afterwards). First attempt failed safely: base was `master`, which has no BAGHEERA folder.
+  Everything committed as 7251b18.
+- Include "In a new branch": the popup now offers "Generated name" or "My own name" (`new_branch` param).
+  A custom name is used exactly (no prefix/suffix); refused if protected, equal to the base, or already on the
+  remote (precheck); the worker also fails the job if Claude reports a different branch. SKILL.md step 2 of
+  include has the `new-branch=` form. Device pre-check accepted by the user as working; revisit if problems.
+
 ## 2026-11-18 — Post-fix / pre-fix per testcase, device pre-checks
 - Device pre-checks: before a validate job the worker logs in read-only (paramiko via `tools/device_check.py`)
   and runs `validation_requirements.fix_checks` Claude wrote (fix present on the fixed device, absent on the

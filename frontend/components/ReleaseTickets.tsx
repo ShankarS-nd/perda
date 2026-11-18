@@ -544,7 +544,7 @@ function JobPanel({
     mode: (lastState?.fixed && !lastState.unfixed ? "unfixed" : !lastState?.fixed && lastState?.unfixed ? "fixed" : "both") as Mode,
     device_id: savedDevice(FIXED_KEY), device_password: "", unfixed_device_id: savedDevice(UNFIXED_KEY), unfixed_device_password: "",
     branch: panel.kind === "start" && panel.stage === "remove" ? (includedIn?.[0] ?? "") : "", target: "existing" as "existing" | "new",
-    confirm_push: false, confirm_remove: false, reviewed: false, accept_gaps: false, skip_device_checks: false,
+    confirm_push: false, confirm_remove: false, name_mode: "generated" as "generated" | "custom", new_branch: "", reviewed: false, accept_gaps: false, skip_device_checks: false,
   }));
   const logBox = useRef<HTMLPreElement>(null);
   const jobId = panel.kind === "job" ? panel.id : null;
@@ -608,6 +608,9 @@ function JobPanel({
             unfixed_device_id: form.mode === "fixed" ? "" : form.unfixed_device_id.trim(),
             unfixed_device_password: form.mode === "fixed" ? "" : form.unfixed_device_password,
           } : {}),
+          ...(panel.stage === "include" ? {
+            new_branch: form.target === "new" && form.name_mode === "custom" ? form.new_branch.trim() : "",
+          } : {}),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -646,7 +649,7 @@ function JobPanel({
         (form.mode === "fixed" || (form.unfixed_device_id.trim() && form.unfixed_device_password))) ||
       (panel.stage === "remove" && form.branch.trim() && form.confirm_remove) ||
       (panel.stage === "include" && form.branch.trim() && (!openGaps.length || form.accept_gaps) &&
-        (form.target === "new" || (form.confirm_push && !PROTECTED.includes(form.branch.trim().replace(/^origin\//, "").toLowerCase())))));
+        (form.target === "new" ? (form.name_mode === "generated" || !!form.new_branch.trim()) : (form.confirm_push && !PROTECTED.includes(form.branch.trim().replace(/^origin\//, "").toLowerCase())))));
   const now = useNow(isActive(job ?? undefined));
   const clock = job ? jobTime(job, now) : { text: "", waited: "" };
   const STATUS_STYLE: Record<string, string> = {
@@ -893,7 +896,31 @@ function JobPanel({
                     </label>
                   </div>
                 ) : (
-                  <p className="text-[11.5px] text-gray-500">Claude creates a new branch from this one, adds the testcases and pushes the new branch. This branch itself is not changed.</p>
+                  <div className="space-y-1.5">
+                    <p className="text-[11.5px] text-gray-500">Claude creates a new branch from this one, adds the testcases and pushes the new branch. This branch itself is not changed.</p>
+                    <fieldset>
+                      <legend className="mb-1 text-[12px] font-medium text-gray-300">Name of the new branch</legend>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {([["generated", "Generated name"], ["custom", "My own name"]] as const).map(([id, label]) => (
+                          <label key={id} className={`cursor-pointer rounded-lg px-2 py-1.5 text-center text-[12px] leading-tight ring-1 ring-inset transition-colors ${
+                            form.name_mode === id ? "bg-indigo-500/20 text-indigo-100 ring-indigo-400/50" : "text-gray-400 ring-white/[0.1] hover:bg-white/[0.05]"}`}>
+                            <input type="radio" name="include-name" className="sr-only" checked={form.name_mode === id} onChange={() => set({ name_mode: id })} />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    {form.name_mode === "generated" ? (
+                      <p className="text-[11.5px] text-gray-400">
+                        Called <code className="font-mono">bugreg/{panel.dt}-on-{(form.branch.trim() || "branch").replace(/^origin\//, "").replace(/\//g, "-")}</code>{" "}
+                        (with -2, -3 … added if that name is already taken).
+                      </p>
+                    ) : (
+                      <Field label="Branch name" hint="Used exactly as typed. If a branch with this name already exists the job stops and pushes nothing.">
+                        <input className={INPUT} value={form.new_branch} onChange={(e) => set({ new_branch: e.target.value })} placeholder="e.g. 6.17_dt5431_regression" />
+                      </Field>
+                    )}
+                  </div>
                 )}
               </>
             )}
