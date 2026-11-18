@@ -32,6 +32,10 @@ Release Tickets endpoint:
   GET  /release-tickets/options → fix versions and sprints for the page's dropdowns
   GET  /ticket-status         → the team-entered status of every ticket (polled so edits show live)
   PUT  /ticket-status/{key}   → set one status column of a ticket
+  GET  /tc-jobs               → Claude jobs behind the status columns + worker online state
+  POST /tc-jobs               → queue generate / validate / include for a ticket
+  POST /tc-worker/*           → workstation worker: claim a job, send log, report result, report what
+                                each ticket's testcases need to be validated (platform, device)
 
 Device Logs endpoints:
   POST /device-logs/download  → run logs_download.py via SSE stream
@@ -119,7 +123,7 @@ def _is_jenkins_auth_error(text: str) -> bool:
     ])
 
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Header, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -155,6 +159,9 @@ from database import (
     get_ticket_statuses,
     set_ticket_status,
     TICKET_STATUS_FIELDS,
+    get_release_checklist,
+    set_checklist_cell,
+    reset_release_checklist,
 )
 from workflow_engine import run_workflow
 
@@ -360,7 +367,8 @@ async def jenkins_token_refresh():
 
 
 # ---------------------------------------------------------------------------
-# Build log — results of every successful Test_Automation_Parallel build
+# Build log — results of every successful Test_Automation_Parallel_v2 and
+# Octo_Test_Automation_Report build
 # ---------------------------------------------------------------------------
 
 BUILD_LOG_POLL_SEC = int(os.getenv("PERDA_BUILD_LOG_POLL_SEC", "600"))
@@ -403,6 +411,7 @@ async def build_log_list(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, description="Build number or package substring"),
+    job: str | None = Query(None, description="daily (Test_Automation_Parallel_v2) or octo (Octo_Test_Automation_Report)"),
     suite: str | None = None,
     model: str | None = Query(None, description="Product model prefix, e.g. BAGHEERA3 or KRAIT"),
     region: str | None = Query(None, description="Product region suffix: NA (US), UK or IN"),
@@ -415,7 +424,7 @@ async def build_log_list(
     max_unknown: float | None = None,
 ):
     filters = {
-        "q": q, "suite": suite, "model": model, "region": region,
+        "q": q, "job": job, "suite": suite, "model": model, "region": region,
         "date_from": date_from, "date_to": date_to,
         "min_pass": min_pass, "max_pass": max_pass,
         "min_known": min_known, "min_unknown": min_unknown, "max_unknown": max_unknown,
@@ -638,6 +647,93 @@ async def release_sync_dry_run(payload: ReleaseSyncDryRunRequest):
         raise HTTPException(status_code=exc.status, detail=str(exc))
 
 
+# ---------------------------------------------------------------------------
+# Relay Control — wraps relayctl.py (bench relay / Pi recovery) on the DTA server
+# ---------------------------------------------------------------------------
+
+class RelayJobRequest(BaseModel):
+    command: str
+    targets: list[str] = []
+    dry_run: bool = False
+    confirmed: bool = False   # the UI sets this only after the user confirms a switching command
+    force: bool = False
+    actor: str = ""
+    timeout: int | None = None   # seconds to wait; only honoured within 60..7200
+
+
+def _relay_call(fn, *args, **kwargs):
+    import relay_ops
+    try:
+        return fn(*args, **kwargs)
+    except relay_ops.RelayError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message)
+
+
+@app.get("/relay/config")
+async def relay_config():
+    import relay_ops
+    return relay_ops.config()
+
+
+@app.post("/relay/jobs")
+async def relay_start_job(payload: RelayJobRequest):
+    import relay_ops
+    return _relay_call(
+        relay_ops.start_job, payload.command, payload.targets, payload.dry_run,
+        payload.confirmed, payload.force, payload.actor, payload.timeout,
+    )
+
+
+@app.get("/relay/jobs")
+async def relay_list_jobs():
+    import relay_ops
+    return relay_ops.list_jobs()
+
+
+@app.get("/relay/jobs/{job_id}")
+async def relay_get_job(job_id: str, after: int = 0):
+    import relay_ops
+    return _relay_call(relay_ops.get_job, job_id, after)
+
+
+@app.get("/relay/audit")
+async def relay_audit(lines: int = 40):
+    import relay_ops
+    return {"lines": relay_ops.audit_tail(lines)}
+
+
+@app.get("/release-checklist")
+async def release_checklist_get():
+    """The shared checklist. Cheap, so the page polls it to stay live."""
+    return get_release_checklist()
+
+
+class ChecklistCellRequest(BaseModel):
+    item: str
+    platform: str
+    status: str
+    actor: str = ""
+
+
+@app.put("/release-checklist")
+async def release_checklist_set(payload: ChecklistCellRequest):
+    try:
+        set_checklist_cell(payload.item, payload.platform, payload.status, payload.actor.strip()[:80])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return get_release_checklist()
+
+
+class ChecklistResetRequest(BaseModel):
+    actor: str = ""
+
+
+@app.post("/release-checklist/reset")
+async def release_checklist_reset(payload: ChecklistResetRequest):
+    reset_release_checklist(payload.actor.strip()[:80])
+    return get_release_checklist()
+
+
 @app.get("/ticket-status")
 async def ticket_status_list():
     """Everything the team has entered. Cheap, so the page polls it for live edits."""
@@ -663,6 +759,136 @@ async def ticket_status_set(key: str, payload: TicketStatusRequest):
     if len(value) > 500:
         raise HTTPException(status_code=400, detail="Value is too long")
     return set_ticket_status(key.upper(), payload.field, value, payload.actor.strip()[:80])
+
+
+# ---------------------------------------------------------------------------
+# Claude jobs behind the Team status columns (queue only; see tc_jobs.py).
+# The jobs run on a workstation worker (tools/tc_worker.py), not on this box.
+# ---------------------------------------------------------------------------
+
+class TcJobRequest(BaseModel):
+    dt: str
+    stage: str                       # generate | validate | include | regenerate | remove
+    actor: str = ""
+    device_id: str = ""
+    device_password: str = ""
+    unfixed_device_id: str = ""
+    unfixed_device_password: str = ""
+    branch: str = ""
+    accept_gaps: bool = False        # include: accept what the last validation left open
+    mode: str = ""                   # validate: fixed | unfixed | both
+    target: str = ""                 # include: existing (push into the branch) | new (branch from it)
+    confirm_push: bool = False       # include into an existing branch needs this
+    confirm_remove: bool = False     # remove from a branch needs this
+    skip_device_checks: bool = False  # validate: run even if the device does not look right for its role
+
+
+class TcWorkerClaim(BaseModel):
+    worker: str = ""
+    project_root: str = ""
+
+
+class TcWorkerProgress(BaseModel):
+    worker: str = ""
+    log: str = ""
+
+
+class TcWorkerRequirements(BaseModel):
+    worker: str = ""
+    items: dict[str, Any] = {}
+
+
+class TcWorkerFiles(BaseModel):
+    worker: str = ""
+    dt: str
+    shas: dict[str, Any] = {}
+    files: list[Any] = []
+
+
+class TcWorkerFinish(BaseModel):
+    worker: str = ""
+    status: str                      # done | failed | cancelled
+    outcome: str = ""
+    message: str = ""
+    result: dict = {}
+
+
+def _tc(fn, *args, **kwargs):
+    import tc_jobs
+
+    try:
+        return fn(*args, **kwargs)
+    except tc_jobs.JobError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@app.get("/tc-jobs")
+def tc_jobs_overview():
+    """Latest job per ticket and stage, and whether a worker is online. Polled by the page."""
+    import tc_jobs
+    return _tc(tc_jobs.overview)
+
+
+@app.get("/tc-jobs/{job_id}")
+def tc_job_get(job_id: str, after: int = Query(0, ge=0)):
+    import tc_jobs
+    return _tc(tc_jobs.get_job, job_id, after)
+
+
+@app.post("/tc-jobs")
+def tc_job_create(payload: TcJobRequest):
+    """Queue a stage for a ticket. Refused unless the stage before it is complete."""
+    import tc_jobs
+    return _tc(tc_jobs.create_job, payload.dt, payload.stage, payload.model_dump(), payload.actor)
+
+
+@app.post("/tc-jobs/{job_id}/cancel")
+def tc_job_cancel(job_id: str):
+    import tc_jobs
+    return _tc(tc_jobs.cancel_job, job_id)
+
+
+@app.post("/tc-worker/claim")
+def tc_worker_claim(payload: TcWorkerClaim, x_worker_token: str | None = Header(None)):
+    import tc_jobs
+    _tc(tc_jobs.check_token, x_worker_token)
+    return {"job": _tc(tc_jobs.claim, payload.worker, payload.project_root)}
+
+
+@app.post("/tc-worker/requirements")
+def tc_worker_requirements(payload: TcWorkerRequirements, x_worker_token: str | None = Header(None)):
+    """The worker reports what each ticket's testcases need (platform, device) so the page can show it."""
+    import tc_jobs
+    _tc(tc_jobs.check_token, x_worker_token)
+    return {"stored": _tc(tc_jobs.set_requirements, payload.items)}
+
+
+@app.post("/tc-worker/files")
+def tc_worker_files(payload: TcWorkerFiles, x_worker_token: str | None = Header(None)):
+    """The worker sends the testcase files of a ticket (hashes first, content only where it changed)."""
+    import tc_jobs
+    _tc(tc_jobs.check_token, x_worker_token)
+    return {"need": _tc(tc_jobs.sync_files, payload.dt, payload.shas, payload.files)}
+
+
+@app.get("/tc-files/{dt}/{name}")
+def tc_file_get(dt: str, name: str):
+    import tc_jobs
+    return _tc(tc_jobs.get_file, dt, name)
+
+
+@app.post("/tc-worker/jobs/{job_id}/progress")
+def tc_worker_progress(job_id: str, payload: TcWorkerProgress, x_worker_token: str | None = Header(None)):
+    import tc_jobs
+    _tc(tc_jobs.check_token, x_worker_token)
+    return _tc(tc_jobs.progress, job_id, payload.worker, payload.log)
+
+
+@app.post("/tc-worker/jobs/{job_id}/finish")
+def tc_worker_finish(job_id: str, payload: TcWorkerFinish, x_worker_token: str | None = Header(None)):
+    import tc_jobs
+    _tc(tc_jobs.check_token, x_worker_token)
+    return _tc(tc_jobs.finish, job_id, payload.worker, payload.status, payload.outcome, payload.message, payload.result)
 
 
 @app.post("/run-script")

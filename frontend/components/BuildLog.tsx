@@ -21,7 +21,10 @@ interface BuildDevice {
   pass_pct: number;
 }
 
+type Job = "daily" | "octo";
+
 interface LoggedBuild {
+  job: Job;
   build_number: number;
   built_at: string;
   duration_sec: number;
@@ -43,8 +46,8 @@ interface LoggedBuild {
 
 interface SyncResult {
   busy: boolean;
-  added: number[];
-  updated: number[];
+  added: string[]; // labels: "#5120", "Octo #476"
+  updated: string[];
 }
 
 interface SyncStatus {
@@ -56,6 +59,7 @@ interface SyncStatus {
 
 interface Filters {
   q: string;
+  job: string;
   suite: string;
   model: string;
   region: string;
@@ -90,6 +94,12 @@ const REGIONS: Choice[] = [
   { value: "IN", label: "IN" },
 ];
 
+/** The Jenkins jobs whose successful builds are logged. */
+const JOBS: Choice[] = [
+  { value: "daily", label: "Daily build" },
+  { value: "octo", label: "Octo acceptance" },
+];
+
 const labelFor = (choices: Choice[], value: string) =>
   choices.find((c) => c.value === value)?.label ?? value;
 
@@ -103,7 +113,7 @@ function describeProduct(product: string): string {
 }
 
 const NO_FILTERS: Filters = {
-  q: "", suite: "", model: "", region: "", dateFrom: "", dateTo: "",
+  q: "", job: "", suite: "", model: "", region: "", dateFrom: "", dateTo: "",
   minPass: "", maxPass: "", minUnknown: "",
 };
 
@@ -136,6 +146,7 @@ const fmtDuration = (sec: number) => {
 function filterParams(f: Filters): URLSearchParams {
   const p = new URLSearchParams();
   if (f.q.trim()) p.set("q", f.q.trim());
+  if (f.job) p.set("job", f.job);
   if (f.suite) p.set("suite", f.suite);
   if (f.model) p.set("model", f.model);
   if (f.region) p.set("region", f.region);
@@ -161,7 +172,7 @@ export default function BuildLog() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [options, setOptions] = useState<FilterOptions>({ suites: [] });
   const [total, setTotal] = useState(0);
@@ -292,7 +303,7 @@ export default function BuildLog() {
       const n = r.added.length;
       setNote(
         r.busy ? "A sync is already running — try again in a moment."
-        : n ? `Logged ${n} new build${n > 1 ? "s" : ""}: ${r.added.map((b) => `#${b}`).join(", ")}`
+        : n ? `Logged ${n} new build${n > 1 ? "s" : ""}: ${r.added.join(", ")}`
         : "Already up to date."
       );
       await load(filters, builds.length);
@@ -303,7 +314,7 @@ export default function BuildLog() {
     }
   };
 
-  const toggle = (n: number) =>
+  const toggle = (n: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(n)) next.delete(n); else next.add(n);
@@ -384,7 +395,8 @@ export default function BuildLog() {
             <div className="ds-empty">
               <p className="text-[15px] font-medium text-gray-400 mb-1">No builds logged yet</p>
               <p className="text-sm text-gray-600 max-w-sm">
-                Successful Test_Automation_Parallel_v2 builds are logged automatically.
+                Successful Test_Automation_Parallel_v2 and Octo_Test_Automation_Report builds
+                are logged automatically.
                 Use “Check for new builds” to pull them now.
               </p>
             </div>
@@ -403,11 +415,12 @@ export default function BuildLog() {
               </thead>
               <tbody>
                 {builds.map((b) => {
-                  const open = expanded.has(b.build_number);
+                  const key = `${b.job}-${b.build_number}`;
+                  const open = expanded.has(key);
                   return (
-                    <Fragment key={b.build_number}>
+                    <Fragment key={key}>
                       <tr
-                        onClick={() => toggle(b.build_number)}
+                        onClick={() => toggle(key)}
                         className="cursor-pointer align-top"
                         aria-expanded={open}
                       >
@@ -419,6 +432,14 @@ export default function BuildLog() {
                           >
                             #{b.build_number}
                           </a>
+                          {b.job === "octo" && (
+                            <span
+                              title="Octo_Test_Automation_Report (Acceptance_Testing_Pipeline)"
+                              className="ml-2 rounded-full border border-sky-500/25 bg-sky-500/10 px-1.5 py-px text-[10px] font-medium text-sky-300"
+                            >
+                              Octo
+                            </span>
+                          )}
                           <div className="text-[11px] text-gray-500 tabular-nums">
                             {fmtDate(b.built_at)} · {fmtDuration(b.duration_sec)}
                           </div>
@@ -582,6 +603,7 @@ function FilterBar({
   // Everything that is set, as removable chips.
   const chips: { key: string; label: string; clear: Partial<Filters> }[] = [];
   if (filters.q.trim()) chips.push({ key: "q", label: `“${filters.q.trim()}”`, clear: { q: "" } });
+  if (filters.job) chips.push({ key: "job", label: `Pipeline: ${labelFor(JOBS, filters.job)}`, clear: { job: "" } });
   if (filters.suite) chips.push({ key: "suite", label: `Suite: ${filters.suite}`, clear: { suite: "" } });
   if (filters.model) chips.push({ key: "model", label: `Device: ${labelFor(MODELS, filters.model)}`, clear: { model: "" } });
   if (filters.region) chips.push({ key: "region", label: `Region: ${labelFor(REGIONS, filters.region)}`, clear: { region: "" } });
@@ -626,6 +648,7 @@ function FilterBar({
           )}
         </div>
 
+        <PillSelect label="Pipeline" value={filters.job} options={JOBS} onChange={(v) => onChange("job", v)} />
         <PillSelect label="Device" value={filters.model} options={MODELS} onChange={(v) => onChange("model", v)} />
         <PillSelect label="Region" value={filters.region} options={REGIONS} onChange={(v) => onChange("region", v)} />
         <PillSelect

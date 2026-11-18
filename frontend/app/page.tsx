@@ -13,6 +13,8 @@ import ReviewBench from "@/components/ReviewBench";
 import BuildLog from "@/components/BuildLog";
 import ReleaseTickets from "@/components/ReleaseTickets";
 import ReleaseSync from "@/components/ReleaseSync";
+import RelayControl from "@/components/RelayControl";
+import ReleaseChecklist from "@/components/ReleaseChecklist";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,6 +27,9 @@ interface ScriptArg {
   default: string;
   required: boolean;
   positional: boolean;
+  choices?: string[];
+  enabled_when?: Record<string, string[]>;
+  required_when?: Record<string, string[]>;
 }
 
 interface ScriptInfo {
@@ -45,6 +50,8 @@ type Page =
   | "build-log"
   | "release-tickets"
   | "release-sync"
+  | "relay-control"
+  | "release-checklist"
   | "workflows"
   | "workflow-runs";
 
@@ -78,6 +85,8 @@ const PAGE_META: PageMeta[] = [
   { key: "build-log", label: "Build Log", description: "Results of every successful Test_Automation_Parallel build", icon: BuildLogIcon, section: "Core" },
   { key: "release-tickets", label: "Release Tickets", description: "Jira tickets of a release with their test coverage", icon: ReleaseTicketsIcon, section: "Core" },
   { key: "release-sync", label: "Release Notes Sync", description: "Prepare test results and change log for the release notes", icon: ReleaseTicketsIcon, section: "Core" },
+  { key: "release-checklist", label: "Release Checklist", description: "Live sign-off of release reports per platform", icon: ChecklistIcon, section: "Core" },
+  { key: "relay-control", label: "Relay Control", description: "Check and recover bench relays and Pis (relayctl)", icon: RelayIcon, section: "Core" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -485,6 +494,24 @@ export default function Home() {
             collapsed={sidebarCollapsed}
           />
 
+          {/* Release Checklist */}
+          <SidebarItem
+            label="Release Checklist"
+            icon={<ChecklistIcon />}
+            active={activePage === "release-checklist"}
+            onClick={() => navigateTo("release-checklist")}
+            collapsed={sidebarCollapsed}
+          />
+
+          {/* Relay Control */}
+          <SidebarItem
+            label="Relay Control"
+            icon={<RelayIcon />}
+            active={activePage === "relay-control"}
+            onClick={() => navigateTo("relay-control")}
+            collapsed={sidebarCollapsed}
+          />
+
           {/* Workflows section */}
           <div className="pt-4 mt-3 border-t border-white/[0.04]">
             {!sidebarCollapsed && (
@@ -700,6 +727,8 @@ export default function Home() {
                 {activePage === "build-log" && <BuildLog />}
                 {activePage === "release-tickets" && <ReleaseTickets />}
                 {activePage === "release-sync" && <ReleaseSync />}
+                {activePage === "release-checklist" && <ReleaseChecklist />}
+                {activePage === "relay-control" && <RelayControl />}
                 {activePage === "workflows" && <WorkflowBuilder />}
                 {activePage === "workflow-runs" && <WorkflowExecution />}
               </motion.div>
@@ -1241,6 +1270,22 @@ function BuildLogIcon() {
         strokeLinejoin="round"
         d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6"
       />
+    </svg>
+  );
+}
+
+function ChecklistIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
+
+function RelayIcon() {
+  return (
+    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
     </svg>
   );
 }

@@ -1,0 +1,12 @@
+{
+  "name": "nd-bug-regression-marketplace",
+  "owner": {
+    "name": "Girishankar S"
+  },
+  "plugins": [
+    {
+      "name": "bug-regression",
+      "source": "./"
+    }
+  ]
+}

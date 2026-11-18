@@ -1,0 +1,27 @@
+# Dependencies for running the bug-regression skill's scripts (bugreg_research.py,
+# validate_candidate.py, create_tc_ticket.py, promote_candidate.py, detect_device.py)
+# and for nd_test_bot itself to run a candidate on a device.
+#
+# Deliberately unpinned -- see docs/SESSION_LEARNINGS.md §8 for why: nd_test_bot's own
+# requirements.txt pins numpy==1.24.4, which has no Python 3.12 wheel and needs the
+# removed `distutils` to build from source. numpy is only actually needed transitively,
+# for report/PDF generation (matplotlib/reportlab) -- not for generating or running a
+# candidate test via CLI. Installing everything else unpinned and letting pip resolve a
+# modern numpy as matplotlib's dependency avoids that build failure entirely.
+pandas
+openpyxl
+python-dotenv
+psycopg2-binary
+boto3
+pytz
+reportlab
+matplotlib
+setproctitle
+grpcio
+protobuf
+bs4
+
+# Also required, not pip-installable:
+# - MongoDB running locally/reachable (`mongod`) -- nd_test_bot's own device/IP lookups
+#   (detect_device.py, main.py) depend on it. Confirm with `systemctl status mongod`
+#   before debugging anything else if a run fails oddly.

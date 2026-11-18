@@ -13,6 +13,9 @@ interface ScriptArg {
   default: string;
   required: boolean;
   positional: boolean;
+  choices?: string[];
+  enabled_when?: Record<string, string[]>;
+  required_when?: Record<string, string[]>;
 }
 
 interface ScriptInfo {
@@ -145,6 +148,15 @@ export default function ScriptRunner({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedScript]);
+
+  /** enabled_when / required_when: the rule holds while another field has one of the listed values. */
+  const ruleHolds = (rule: Record<string, string[]> | undefined) =>
+    !!rule && Object.entries(rule).every(([k, vals]) => vals.includes(argValues[k] ?? ""));
+  const isEnabled = (a: ScriptArg) => !a.enabled_when || ruleHolds(a.enabled_when);
+  const isRequired = (a: ScriptArg) => isEnabled(a) && (ruleHolds(a.required_when) || (!a.enabled_when && a.required && !a.default));
+  const missingRequired = selectedScript
+    ? selectedScript.args.filter((a) => a.required_when && isRequired(a) && !(argValues[a.name] ?? "").trim())
+    : [];
 
   const handleArgChange = (name: string, value: string) => {
     setArgValues((prev) => ({ ...prev, [name]: value }));
@@ -395,7 +407,7 @@ export default function ScriptRunner({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {selectedScript.args.map((arg) => (
-                <div key={arg.name} className="space-y-1.5">
+                <div key={arg.name} className={`space-y-1.5 ${isEnabled(arg) ? "" : "opacity-45"}`}>
                   {/* The backend names these in snake_case; a person reading
                       the form should not have to. Type and requiredness move
                       to a quiet trailing hint instead of parenthetical noise. */}
@@ -406,8 +418,10 @@ export default function ScriptRunner({
                     <span className="text-[12px] font-medium text-gray-200">
                       {humanizeArg(arg.name)}
                     </span>
-                    <span className="ml-auto font-mono text-[11px] text-gray-600">
-                      {arg.type}
+                    <span className={`ml-auto font-mono text-[11px] ${isRequired(arg) && arg.enabled_when ? "text-amber-300" : "text-gray-600"}`}>
+                      {arg.enabled_when
+                        ? !isEnabled(arg) ? "not used by this command" : isRequired(arg) ? "required" : "optional"
+                        : arg.type}
                     </span>
                   </label>
                   {arg.description && (
@@ -416,6 +430,7 @@ export default function ScriptRunner({
                   {arg.type === "bool" ? (
                     <button
                       type="button"
+                      disabled={!isEnabled(arg)}
                       onClick={() =>
                         handleArgChange(
                           arg.name,
@@ -436,9 +451,19 @@ export default function ScriptRunner({
                         }`}
                       />
                     </button>
+                  ) : arg.choices && arg.choices.length > 0 ? (
+                    <select
+                      disabled={!isEnabled(arg)}
+                      className="ds-input w-full"
+                      value={argValues[arg.name] ?? ""}
+                      onChange={(e) => handleArgChange(arg.name, e.target.value)}
+                    >
+                      {arg.choices.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
                   ) : (
                     <input
                       type={inputTypeFor(arg.type)}
+                      disabled={!isEnabled(arg)}
                       className="ds-input w-full"
                       placeholder={
                         arg.default
@@ -458,7 +483,8 @@ export default function ScriptRunner({
           <div className="flex items-center gap-3 mt-5 pt-4 border-t border-white/[0.04]">
             <button
               onClick={handleRun}
-              disabled={loading || !selectedScript}
+              disabled={loading || !selectedScript || missingRequired.length > 0}
+              title={missingRequired.length ? `Fill in: ${missingRequired.map((a) => humanizeArg(a.name)).join(", ")}` : undefined}
               className="ds-btn-primary"
             >
               {loading ? (

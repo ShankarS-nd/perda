@@ -1,0 +1,8 @@
+{
+  "name": "bug-regression",
+  "version": "1.0.1",
+  "description": "Turn a Netradyne Jira bug ticket (DT or OCTO project) into a validated, PR-diff-grounded nd_test_bot regression test.",
+  "author": {
+    "name": "Girishankar S"
+  }
+}

@@ -49,6 +49,11 @@ class ScriptArg(BaseModel):
     default: str = ""       # default value (always stringified)
     required: bool = True
     positional: bool = False  # if True, pass as positional arg (no --flag)
+    choices: list[str] = []   # if set, the form shows a dropdown of these values
+    # Field is enabled (otherwise greyed out) only while another field holds one of these values
+    enabled_when: dict[str, list[str]] = {}
+    # ...and is marked "required" while another field holds one of these values
+    required_when: dict[str, list[str]] = {}
 
 
 class ScriptInfo(BaseModel):
@@ -109,6 +114,11 @@ def _eval_args_list(list_node: ast.List) -> list[ScriptArg]:
                 data[k.value] = v.value
             elif isinstance(v, ast.NameConstant):  # Python 3.7 compat
                 data[k.value] = v.value
+            elif k.value in ("choices", "enabled_when", "required_when"):
+                try:
+                    data[k.value] = ast.literal_eval(v)
+                except (ValueError, SyntaxError):
+                    pass
         if "name" in data and "type" in data:
             args.append(ScriptArg(
                 name=data["name"],
@@ -117,6 +127,9 @@ def _eval_args_list(list_node: ast.List) -> list[ScriptArg]:
                 default=str(data.get("default", "")),
                 required=data.get("required", True),
                 positional=data.get("positional", False),
+                choices=[str(c) for c in data.get("choices", [])],
+                enabled_when={str(a): [str(x) for x in b] for a, b in dict(data.get("enabled_when", {})).items()},
+                required_when={str(a): [str(x) for x in b] for a, b in dict(data.get("required_when", {})).items()},
             ))
     return args
 
@@ -268,6 +281,12 @@ def _discover_script(filepath: Path) -> ScriptInfo | None:
 # ---------------------------------------------------------------------------
 
 
+# Not shown in the Scripts list (or the Workflow Builder palette). The files stay because the backend
+# imports or runs them itself (rc_comparison: Test Report / TC pages; logs_download: Device Logs).
+# They can still be run by name, e.g. from an already saved workflow.
+HIDDEN_FROM_LIST = {"rc_comparison", "daily_comparison", "logs_download"}
+
+
 def list_scripts() -> list[ScriptInfo]:
     """Discover every Python script in the ``scripts/`` directory."""
     scripts: list[ScriptInfo] = []
@@ -276,7 +295,7 @@ def list_scripts() -> list[ScriptInfo]:
         return scripts
 
     for path in sorted(SCRIPTS_DIR.glob("*.py")):
-        if path.name.startswith("_"):
+        if path.name.startswith("_") or path.stem in HIDDEN_FROM_LIST:
             continue
         info = _discover_script(path)
         if info is not None:

@@ -30,11 +30,11 @@ Provides:
   save_review_run()          → record an execution of a testcase on a device
   get_review_runs()          → runs for a testcase, newest first
 
-  Build log (one row per successful Test_Automation_Parallel build):
+  Build log (one row per successful Test_Automation_Parallel_v2 or Octo_Test_Automation_Report build):
   save_logged_build()               → insert / refresh a build's results
   get_logged_builds()               → a filtered page of builds, newest first
   get_build_filter_options()        → distinct suites for the filter
-  get_logged_build_numbers()        → build numbers already logged
+  get_logged_build_numbers()        → build numbers of one job already logged
   get_logged_builds_needing_retry() → logged builds still missing known/unknown counts
 """
 
@@ -188,31 +188,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_review_runs_tc
                 ON review_runs(testcase_id);
 
-            -- One row per successful Jenkins build of Test_Automation_Parallel_v2.
-            -- Counts are summed across devices; percentages are over applicable
-            -- tests (pass + fail + not-executed). known/unknown are NULL until
-            -- the DAST pages could be read, and are re-fetched on a later sync.
-            CREATE TABLE IF NOT EXISTS build_log (
-                build_number  INTEGER  PRIMARY KEY,
-                built_at      TEXT     NOT NULL DEFAULT '',
-                duration_sec  INTEGER  NOT NULL DEFAULT 0,
-                suite         TEXT     NOT NULL DEFAULT '',
-                product       TEXT     NOT NULL DEFAULT '',
-                packages_json TEXT     NOT NULL DEFAULT '[]',
-                devices_json  TEXT     NOT NULL DEFAULT '[]',
-                pass_count    INTEGER  NOT NULL DEFAULT 0,
-                fail_count    INTEGER  NOT NULL DEFAULT 0,
-                ne_count      INTEGER  NOT NULL DEFAULT 0,
-                na_count      INTEGER  NOT NULL DEFAULT 0,
-                known_count   INTEGER,
-                unknown_count INTEGER,
-                pass_pct      REAL     NOT NULL DEFAULT 0,
-                known_pct     REAL,
-                unknown_pct   REAL,
-                build_url     TEXT     NOT NULL DEFAULT '',
-                report_url    TEXT     NOT NULL DEFAULT '',
-                logged_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
+            -- build_log is created by _ensure_build_log() below.
 
             -- Team-maintained status of a Jira ticket's test coverage (Release
             -- Tickets page). One row per ticket, edited by hand and shared by
@@ -226,6 +202,57 @@ def init_db() -> None:
                 updated_by       TEXT     NOT NULL DEFAULT '',
                 updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            -- Claude jobs started from the Team status columns (see tc_jobs.py).
+            -- Queued here, run by a worker on a workstation. Device passwords
+            -- are never stored in this table.
+            CREATE TABLE IF NOT EXISTS tc_jobs (
+                id               TEXT     PRIMARY KEY,
+                dt               TEXT     NOT NULL,
+                stage            TEXT     NOT NULL,   -- generate | validate | include
+                params_json      TEXT     NOT NULL DEFAULT '{}',
+                status           TEXT     NOT NULL DEFAULT 'queued',  -- queued | running | done | failed | cancelled
+                prev_value       TEXT     NOT NULL DEFAULT '',
+                result_json      TEXT     NOT NULL DEFAULT '{}',
+                message          TEXT     NOT NULL DEFAULT '',
+                log              TEXT     NOT NULL DEFAULT '',
+                cancel_requested INTEGER  NOT NULL DEFAULT 0,
+                actor            TEXT     NOT NULL DEFAULT '',
+                worker           TEXT     NOT NULL DEFAULT '',
+                created_at       TEXT     NOT NULL,
+                started_at       TEXT,
+                heartbeat_at     TEXT,
+                finished_at      TEXT
+            );
+            CREATE INDEX IF NOT EXISTS tc_jobs_dt ON tc_jobs (dt, stage, created_at);
+
+            CREATE TABLE IF NOT EXISTS tc_gap_accepted (
+                job_id      TEXT PRIMARY KEY,
+                dt          TEXT NOT NULL,
+                accepted_by TEXT NOT NULL,
+                accepted_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tc_files (
+                dt         TEXT NOT NULL,
+                name       TEXT NOT NULL,
+                sha        TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (dt, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS tc_requirements (
+                dt         TEXT PRIMARY KEY,
+                data_json  TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tc_workers (
+                name         TEXT PRIMARY KEY,
+                last_seen    TEXT NOT NULL,
+                project_root TEXT NOT NULL DEFAULT ''
+            );
         """)
 
         # CREATE TABLE IF NOT EXISTS leaves an already-created table alone, so a
@@ -238,8 +265,79 @@ def init_db() -> None:
             )
 
         conn.commit()
+        _ensure_build_log(conn)
     finally:
         conn.close()
+
+
+# One row per successful Jenkins build of a test job. `job` says which:
+#   'daily' = Test_Automation_Parallel_v2 (Daily_Build_Pipeline; older
+#             Test_Automation_Parallel rows are 'daily' too),
+#   'octo'  = Octo_Test_Automation_Report (Acceptance_Testing_Pipeline).
+# Build numbers repeat across jobs, hence the two-column key. Counts are summed
+# across devices; percentages are over applicable tests (pass + fail +
+# not-executed). known/unknown are NULL until the DAST pages could be read,
+# and are re-fetched on a later sync.
+_BUILD_LOG_DDL = """
+    CREATE TABLE {name} (
+        job           TEXT     NOT NULL DEFAULT 'daily',
+        build_number  INTEGER  NOT NULL,
+        built_at      TEXT     NOT NULL DEFAULT '',
+        duration_sec  INTEGER  NOT NULL DEFAULT 0,
+        suite         TEXT     NOT NULL DEFAULT '',
+        product       TEXT     NOT NULL DEFAULT '',
+        packages_json TEXT     NOT NULL DEFAULT '[]',
+        devices_json  TEXT     NOT NULL DEFAULT '[]',
+        pass_count    INTEGER  NOT NULL DEFAULT 0,
+        fail_count    INTEGER  NOT NULL DEFAULT 0,
+        ne_count      INTEGER  NOT NULL DEFAULT 0,
+        na_count      INTEGER  NOT NULL DEFAULT 0,
+        known_count   INTEGER,
+        unknown_count INTEGER,
+        pass_pct      REAL     NOT NULL DEFAULT 0,
+        known_pct     REAL,
+        unknown_pct   REAL,
+        build_url     TEXT     NOT NULL DEFAULT '',
+        report_url    TEXT     NOT NULL DEFAULT '',
+        logged_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (job, build_number)
+    )
+"""
+
+_BUILD_LOG_OLD_COLUMNS = (
+    "build_number, built_at, duration_sec, suite, product, packages_json, "
+    "devices_json, pass_count, fail_count, ne_count, na_count, known_count, "
+    "unknown_count, pass_pct, known_pct, unknown_pct, build_url, report_url, logged_at"
+)
+
+
+def _ensure_build_log(conn: sqlite3.Connection) -> None:
+    """Create build_log, or move a pre-`job` table (key: build_number alone) to
+    the two-column key. Every worker runs this at startup, so the check is
+    repeated under a write lock and only one of them migrates."""
+    def columns() -> set[str]:
+        return {r["name"] for r in conn.execute("PRAGMA table_info(build_log)")}
+
+    if "job" in columns():
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        cols = columns()
+        if not cols:
+            conn.execute(_BUILD_LOG_DDL.format(name="build_log"))
+        elif "job" not in cols:
+            conn.execute("DROP TABLE IF EXISTS build_log_new")
+            conn.execute(_BUILD_LOG_DDL.format(name="build_log_new"))
+            conn.execute(
+                f"INSERT INTO build_log_new (job, {_BUILD_LOG_OLD_COLUMNS}) "
+                f"SELECT 'daily', {_BUILD_LOG_OLD_COLUMNS} FROM build_log"
+            )
+            conn.execute("DROP TABLE build_log")
+            conn.execute("ALTER TABLE build_log_new RENAME TO build_log")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +955,132 @@ def set_ticket_status(dt: str, field: str, value: str, actor: str) -> dict[str, 
 
 
 # ---------------------------------------------------------------------------
+# Release checklist (one shared checklist, live for everyone using the page)
+# ---------------------------------------------------------------------------
+
+CHECKLIST_PLATFORMS = ("D450US", "D215US")
+CHECKLIST_ITEMS = (
+    "Regression Test Automation reports",
+    "DTS Analysis and Edge Infra report",
+    "EXTCAM Test Automation Report",
+    "VDM Report",
+    "Installer App report",
+    "Data Bandwidth Consumption",
+    "Critical Event Difference summary",
+)
+CHECKLIST_STATUSES = ("Pending", "Done", "N/A")
+# What the team had on the sheet when the tab was added. Used only until a cell is first edited.
+CHECKLIST_SEED = {
+    ("Regression Test Automation reports", "D450US"): "Done",
+    ("Regression Test Automation reports", "D215US"): "Done",
+    ("DTS Analysis and Edge Infra report", "D450US"): "Done",
+    ("EXTCAM Test Automation Report", "D450US"): "Done",
+    ("EXTCAM Test Automation Report", "D215US"): "N/A",
+    ("VDM Report", "D450US"): "Done",
+    ("VDM Report", "D215US"): "N/A",
+    ("Installer App report", "D450US"): "Done",
+    ("Installer App report", "D215US"): "Done",
+    ("Data Bandwidth Consumption", "D450US"): "Done",
+    ("Critical Event Difference summary", "D450US"): "Done",
+}
+
+
+def _ensure_checklist(conn: sqlite3.Connection) -> None:
+    """Create the table and, the first time only, fill it with the seed above."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS release_checklist (
+            item        TEXT NOT NULL,
+            platform    TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'Pending',
+            updated_by  TEXT NOT NULL DEFAULT '',
+            updated_at  TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (item, platform)
+        )
+        """
+    )
+    conn.execute("CREATE TABLE IF NOT EXISTS release_checklist_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if conn.execute("SELECT 1 FROM release_checklist_meta WHERE k = 'seeded'").fetchone() is None:
+            now = datetime.now(timezone.utc).isoformat()
+            for (item, platform), status in CHECKLIST_SEED.items():
+                conn.execute(
+                    "INSERT OR IGNORE INTO release_checklist (item, platform, status, updated_by, updated_at) VALUES (?, ?, ?, 'initial sheet', ?)",
+                    (item, platform, status, now),
+                )
+            conn.execute("INSERT INTO release_checklist_meta (k, v) VALUES ('seeded', ?)", (now,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def get_release_checklist() -> dict[str, Any]:
+    conn = _connect()
+    try:
+        _ensure_checklist(conn)
+        rows = conn.execute("SELECT * FROM release_checklist").fetchall()
+        cells = {(r["item"], r["platform"]): dict(r) for r in rows}
+        out = []
+        for item in CHECKLIST_ITEMS:
+            out.append({
+                "item": item,
+                "cells": {
+                    p: cells.get((item, p), {"status": "Pending", "updated_by": "", "updated_at": ""})
+                    for p in CHECKLIST_PLATFORMS
+                },
+            })
+        reset = conn.execute("SELECT v FROM release_checklist_meta WHERE k = 'reset_at'").fetchone()
+        return {
+            "platforms": list(CHECKLIST_PLATFORMS),
+            "statuses": list(CHECKLIST_STATUSES),
+            "rows": out,
+            "reset_at": reset["v"] if reset else "",
+        }
+    finally:
+        conn.close()
+
+
+def set_checklist_cell(item: str, platform: str, status: str, actor: str) -> None:
+    if item not in CHECKLIST_ITEMS or platform not in CHECKLIST_PLATFORMS or status not in CHECKLIST_STATUSES:
+        raise ValueError("unknown item, platform or status")
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _connect()
+    try:
+        _ensure_checklist(conn)
+        conn.execute(
+            """
+            INSERT INTO release_checklist (item, platform, status, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(item, platform) DO UPDATE SET
+                status = excluded.status, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+            """,
+            (item, platform, status, actor, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reset_release_checklist(actor: str) -> None:
+    """Start a new release: every Done cell back to Pending (N/A cells stay N/A)."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _connect()
+    try:
+        _ensure_checklist(conn)
+        conn.execute(
+            "UPDATE release_checklist SET status = 'Pending', updated_by = ?, updated_at = ? WHERE status = 'Done'",
+            (actor, now),
+        )
+        conn.execute("INSERT OR REPLACE INTO release_checklist_meta (k, v) VALUES ('reset_at', ?)", (now,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Build log
 # ---------------------------------------------------------------------------
 
@@ -868,12 +1092,12 @@ def save_logged_build(rec: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO build_log
-                (build_number, built_at, duration_sec, suite, product,
+                (job, build_number, built_at, duration_sec, suite, product,
                  packages_json, devices_json, pass_count, fail_count, ne_count,
                  na_count, known_count, unknown_count, pass_pct, known_pct,
                  unknown_pct, build_url, report_url, logged_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(build_number) DO UPDATE SET
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(job, build_number) DO UPDATE SET
                 built_at=excluded.built_at, duration_sec=excluded.duration_sec,
                 suite=excluded.suite, product=excluded.product,
                 packages_json=excluded.packages_json, devices_json=excluded.devices_json,
@@ -885,7 +1109,7 @@ def save_logged_build(rec: dict[str, Any]) -> None:
                 report_url=excluded.report_url
             """,
             (
-                rec["build_number"], rec["built_at"], rec["duration_sec"],
+                rec.get("job", "daily"), rec["build_number"], rec["built_at"], rec["duration_sec"],
                 rec["suite"], rec["product"],
                 json.dumps(rec["packages"]), json.dumps(rec["devices"]),
                 rec["pass_count"], rec["fail_count"], rec["ne_count"], rec["na_count"],
@@ -909,6 +1133,9 @@ def _build_filter_sql(f: dict[str, Any]) -> tuple[str, list[Any]]:
         like = f"%{q}%"
         where.append("(CAST(build_number AS TEXT) LIKE ? OR packages_json LIKE ?)")
         args += [like, like]
+    if f.get("job"):
+        where.append("job = ?")
+        args.append(f["job"])
     if f.get("suite"):
         where.append("suite = ?")
         args.append(f["suite"])
@@ -970,22 +1197,23 @@ def get_build_filter_options() -> dict[str, list[str]]:
         conn.close()
 
 
-def get_logged_build_numbers() -> set[int]:
+def get_logged_build_numbers(job: str = "daily") -> set[int]:
     conn = _connect()
     try:
-        return {r[0] for r in conn.execute("SELECT build_number FROM build_log")}
+        return {r[0] for r in conn.execute("SELECT build_number FROM build_log WHERE job = ?", (job,))}
     finally:
         conn.close()
 
 
-def get_logged_builds_needing_retry() -> list[int]:
-    """Builds logged before their DAST known/unknown pages were readable."""
+def get_logged_builds_needing_retry(job: str = "daily") -> list[int]:
+    """Builds of `job` logged before their DAST known/unknown pages were readable."""
     conn = _connect()
     try:
         return [
             r[0] for r in conn.execute(
                 "SELECT build_number FROM build_log "
-                "WHERE known_count IS NULL OR unknown_count IS NULL"
+                "WHERE job = ? AND (known_count IS NULL OR unknown_count IS NULL)",
+                (job,),
             )
         ]
     finally:
