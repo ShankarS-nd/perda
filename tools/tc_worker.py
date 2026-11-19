@@ -290,6 +290,8 @@ def judge_validation(root: Path, job: dict[str, Any], result: dict[str, Any], ou
         final = computed or "inconclusive"
     elif computed:
         final = min(outcome, computed, key=lambda o: OUTCOME_RANK[o])   # never above what Claude found
+        if computed == "yes" and outcome == "partial" and result.get("reason_category") in ("device", "environment", None, ""):
+            final = "yes"      # Claude only saw its own half-run; both halves are on record for every testcase
     else:
         final = outcome
     fixed, unfixed = run_sides(params, result, outcome)

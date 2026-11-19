@@ -1143,3 +1143,19 @@ def test_device_caused_failure_is_inconclusive_not_failed(tmp_path):
     # the same failure blamed on the testcase is still a failure
     final, extra = tw.judge_validation(tmp_path, job, dict(res, reason_category="testcase"), "no")
     assert final == "no" and set(extra["testcase_status"].values()) == {"failed"}
+
+
+def test_both_halves_on_record_lift_a_half_run_partial_to_yes(tmp_path):
+    d = tmp_path / "out" / "DT-8"
+    d.mkdir(parents=True)
+    f = d / "TC_1_A.py"
+    f.write_text("a")
+    job1 = {"dt": "DT-8", "id": "j1", "params": {"mode": "unfixed", "unfixed_device_id": "222222"}}
+    res1 = {"outcome": "partial", "unfixed_result": "fail", "unfixed_conclusive": True, "testcases": ["TC_1_A.py"]}
+    final, extra = tw.judge_validation(tmp_path, job1, res1, "partial")
+    tw.commit_validation_state(tmp_path, job1, dict(res1, **extra))
+    job2 = {"dt": "DT-8", "id": "j2", "params": {"mode": "fixed", "device_id": "111111"}}
+    res2 = {"outcome": "partial", "fixed_result": "pass", "reason_category": "device", "testcases": ["TC_1_A.py"]}
+    assert tw.judge_validation(tmp_path, job2, res2, "partial")[0] == "yes"
+    # a partial blamed on the testcase or the product is never lifted
+    assert tw.judge_validation(tmp_path, job2, dict(res2, reason_category="testcase"), "partial")[0] == "partial"
