@@ -595,6 +595,8 @@ def fix_checks(root: Path, dt: str) -> list[dict[str, str]]:
     for c in raw[:12] if isinstance(raw, list) else []:
         if not isinstance(c, dict) or not safe_check_command(c.get("command")):
             continue
+        if re.search(r"\bgrep\s+-\w*(r\w*c|c\w*r)", str(c.get("command"))) and "wc" not in str(c.get("command")):
+            continue                              # `grep -rc` on a folder prints a line per file: its digits would match
         try:
             re.compile(str(c.get("match") or ""))
         except re.error:
@@ -815,6 +817,9 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "dpkg -s; pipes allowed; no redirects, no ;, no &, no sudo)\", \"match\": \"a regex searched in its output\", "
         "\"fixed\": \"match|nomatch|skip\", \"unfixed\": \"match|nomatch|skip\"}`. `fixed` / `unfixed` say what the "
         "output must do on the device WITH / WITHOUT the fix: `match` (regex found), `nomatch` (not found) or `skip`. "
+        "The regex is searched in the WHOLE output, so the command must print one short line: count with `grep -c` on ONE "
+        "file, or `grep -rl <string> <dir> | wc -l` for a folder. Never `grep -rc` on a folder (it prints a `path:count` "
+        "line per file, and any digit in a file name matches `[1-9]`). Anchor the regex (`^[1-9]`, `^active$`). "
         "Use code the PR really changed (a config key or section it added, a string or md5 in a file it touched) so the "
         "check separates the two builds, plus what both devices need (a service that must be active: fixed `match` and "
         "unfixed `match`). Base each on what you verified in the diff and on a device if you had one; leave out a check you "

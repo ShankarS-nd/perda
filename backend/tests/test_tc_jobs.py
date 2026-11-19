@@ -1108,3 +1108,17 @@ def test_generate_and_regenerate_prompts_say_how_to_read_a_pr_without_the_api(tm
         assert "refs/pull/<number>/head" in prompt and "is-ancestor" in prompt
     val = tw.build_prompt({"dt": "DT-1", "stage": "validate", "id": "j", "params": {"mode": "fixed", "device_id": "123456"}}, tmp_path / "r.json")
     assert "refs/pull/" not in val                     # only where PRs are read
+
+
+def test_fix_checks_drop_grep_rc_on_a_folder_but_keep_single_file_counts(tmp_path):
+    d = tmp_path / "out" / "DT-2"
+    d.mkdir(parents=True)
+    checks = [
+        {"what": "bad", "command": "grep -rc 'x' /home/ubuntu/dir/", "match": "[1-9]", "fixed": "match", "unfixed": "nomatch"},
+        {"what": "bad2", "command": "grep -cr x /dir", "match": "^[1-9]", "fixed": "match", "unfixed": "nomatch"},
+        {"what": "ok file", "command": "grep -c x /dir/f.ini", "match": "^[1-9]", "fixed": "match", "unfixed": "nomatch"},
+        {"what": "ok folder", "command": "grep -rl x /dir | wc -l", "match": "^[1-9]", "fixed": "match", "unfixed": "nomatch"}]
+    (d / "bug_analysis.json").write_text(json.dumps({"validation_requirements": {"fix_checks": checks}}))
+    assert [c["what"] for c in tw.fix_checks(tmp_path, "DT-2")] == ["ok file", "ok folder"]
+    prompt = tw.build_prompt({"dt": "DT-2", "stage": "generate", "id": "j", "params": {}}, tmp_path / "r.json")
+    assert "Never `grep -rc` on a folder" in prompt
