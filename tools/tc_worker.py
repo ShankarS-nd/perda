@@ -548,16 +548,34 @@ def open_pr_refs(root: Path, dt: str) -> dict[str, tuple[str, str]]:
     return out
 
 
-def current_pr_heads(root: Path, dt: str, keys: list[str] | None = None) -> dict[str, str]:
-    out = {}
-    for key, (repo, number) in open_pr_refs(root, dt).items():
-        if keys is not None and key not in keys:
+def remote_ref_shas(repo: Path, refs: list[str]) -> dict[str, str]:
+    """Several refs of one remote in a single `git ls-remote` (each call costs seconds of network)."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=15"}
+    for target in remote_targets(repo):
+        try:
+            r = subprocess.run(["git", "ls-remote", target, *refs], cwd=repo, capture_output=True, text=True,
+                               timeout=60, env=env, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
             continue
-        repo_dir = root / "repos" / repo
-        if (repo_dir / ".git").exists():
-            sha = remote_ref_sha(repo_dir, f"refs/pull/{number}/head")
-            if sha:
-                out[key] = sha
+        if r.returncode == 0:
+            out = {}
+            for line in r.stdout.splitlines():
+                parts = line.split()
+                if len(parts) == 2 and parts[1] in refs and re.fullmatch(r"[0-9a-f]{40}", parts[0]):
+                    out[parts[1]] = parts[0]
+            return out
+    return {}
+
+
+def current_pr_heads(root: Path, dt: str, keys: list[str] | None = None) -> dict[str, str]:
+    by_repo: dict[str, dict[str, str]] = {}
+    for key, (repo, number) in open_pr_refs(root, dt).items():
+        if (keys is None or key in keys) and (root / "repos" / repo / ".git").exists():
+            by_repo.setdefault(repo, {})[f"refs/pull/{number}/head"] = key
+    out = {}
+    for repo, refmap in by_repo.items():
+        shas = remote_ref_shas(root / "repos" / repo, list(refmap))
+        out.update({refmap[ref]: sha for ref, sha in shas.items()})
     return out
 
 
@@ -588,12 +606,43 @@ def pr_new_commits(root: Path, dt: str) -> list[dict[str, str]]:
             for k in sorted(base) if k in now and now[k] != base[k]]
 
 
-def publish_requirements(api: "Api", root: Path) -> None:
+class HeadWatcher(threading.Thread):
+    """Checks every ticket's open PRs for new commits in the background, so the job loop never waits on the network."""
+
+    def __init__(self, root: Path, interval: int = 600) -> None:
+        super().__init__(daemon=True, name="pr-head-watcher")
+        self.root, self.interval = root, interval
+        self.lock = threading.Lock()
+        self.result: dict[str, list[dict[str, str]]] = {}
+
+    def refresh(self) -> None:
+        res: dict[str, list[dict[str, str]]] = {}
+        for d in sorted((self.root / "out").glob("*-*")):
+            if DT_RE.fullmatch(d.name) and (d / "bug_analysis.json").is_file() and any(d.glob("TC_*.py")) \
+                    and open_pr_refs(self.root, d.name):
+                res[d.name] = pr_new_commits(self.root, d.name)
+        with self.lock:
+            self.result = res
+
+    def get(self, dt: str) -> list[dict[str, str]]:
+        with self.lock:
+            return list(self.result.get(dt, []))
+
+    def run(self) -> None:
+        while True:
+            try:
+                self.refresh()
+            except Exception as exc:  # noqa: BLE001 - a failed check must never stop the worker
+                print(f"  head watcher: {exc}", flush=True)
+            time.sleep(self.interval)
+
+
+def publish_requirements(api: "Api", root: Path, watcher: "HeadWatcher | None" = None) -> None:
     items = {}
     for d in sorted((root / "out").glob("*-*")):
         if DT_RE.fullmatch(d.name) and (d / "bug_analysis.json").is_file() and any(d.glob("TC_*.py")):
             items[d.name] = requirements(root, d.name)
-            items[d.name]["pr_new_commits"] = pr_new_commits(root, d.name)
+            items[d.name]["pr_new_commits"] = watcher.get(d.name) if watcher else []
     if items:
         try:
             api.post("/tc-worker/requirements", {"items": items})
@@ -1634,6 +1683,8 @@ def main() -> int:
 
     api = Api(args.server, args.token, args.name)
     last_publish = 0.0
+    watcher = HeadWatcher(args.project_root)
+    watcher.start()
     print(f"Worker {args.name} -> {api.server}\n  project: {args.project_root}\n  skill:   {args.skill_dir}\n"
           f"  model:   {args.model}\n"
           f"  claude permission mode: {args.permission_mode}\nWaiting for jobs (Ctrl+C to stop).", flush=True)
@@ -1666,14 +1717,14 @@ def main() -> int:
                              {"status": "failed", "outcome": "", "message": f"Worker error: {exc}", "result": {}})
                 except Exception:
                     pass
-            publish_requirements(api, args.project_root)
+            publish_requirements(api, args.project_root, watcher)
             publish_files(api, args.project_root)
             last_publish = time.time()
             if args.once:
                 return 0
         else:
             if time.time() - last_publish > 300:     # first idle pass, then every 5 minutes
-                publish_requirements(api, args.project_root)
+                publish_requirements(api, args.project_root, watcher)
                 publish_files(api, args.project_root)
                 last_publish = time.time()
             time.sleep(POLL_SEC)

@@ -1225,7 +1225,7 @@ def test_new_commits_on_an_open_pr_are_detected_against_the_recorded_head(tmp_pa
     (tmp_path / "repos" / "repo_a" / ".git").mkdir(parents=True)
     sha1, sha2 = "a" * 40, "b" * 40
     heads = {"refs/pull/7/head": sha1}
-    monkeypatch.setattr(tw, "remote_ref_sha", lambda repo, ref: heads.get(ref, ""))
+    monkeypatch.setattr(tw, "remote_ref_shas", lambda repo, refs: {r: heads[r] for r in refs if r in heads})
     assert list(tw.open_pr_refs(tmp_path, "DT-5")) == ["repo_a#7"]                  # merged PRs are not tracked
     assert tw.pr_new_commits(tmp_path, "DT-5") == []                                # no record yet: tracking starts now
     assert json.loads(tw._heads_path(tmp_path, "DT-5").read_text())["heads"] == {"repo_a#7": sha1}
@@ -1237,3 +1237,35 @@ def test_new_commits_on_an_open_pr_are_detected_against_the_recorded_head(tmp_pa
     assert tw.record_pr_heads(tmp_path, "DT-5") == {}
     clean = tj.clean_requirements({"pr_new_commits": [{"pr": "r#1", "before": "a" * 40, "now": "b"}, {"x": 1}]})
     assert clean["pr_new_commits"] == [{"pr": "r#1", "before": "a" * 12, "now": "b"}]
+
+
+def test_publishing_never_waits_on_the_network_and_the_watcher_batches_lookups(tmp_path, monkeypatch):
+    d = tmp_path / "out" / "DT-4"
+    d.mkdir(parents=True)
+    (d / "TC_1_A.py").write_text("x")
+    (d / "bug_analysis.json").write_text("{}")
+    (d / "research_bundle.json").write_text(json.dumps({"dev_status_prs": [
+        {"id": "#1", "status": "OPEN", "repository": "o/repo_a"}, {"id": "#2", "status": "OPEN", "repository": "o/repo_a"}]}))
+    (tmp_path / "repos" / "repo_a" / ".git").mkdir(parents=True)
+    calls = []
+    sha = {"refs/pull/1/head": "a" * 40, "refs/pull/2/head": "b" * 40}
+
+    def fake(repo, refs):
+        calls.append(sorted(refs))
+        return {r: sha[r] for r in refs if r in sha}
+    monkeypatch.setattr(tw, "remote_ref_shas", fake)
+    watcher = tw.HeadWatcher(tmp_path)
+    posted = {}
+
+    class FakeApi:
+        def post(self, path, body):
+            posted.update(body)
+    tw.publish_requirements(FakeApi(), tmp_path, watcher)          # before the watcher ran: no network, empty list
+    assert calls == [] and posted["items"]["DT-4"]["pr_new_commits"] == []
+    watcher.refresh()                                               # first pass records the baseline: one call for both PRs
+    assert calls == [["refs/pull/1/head", "refs/pull/2/head"]]
+    sha["refs/pull/2/head"] = "c" * 40
+    watcher.refresh()
+    assert watcher.get("DT-4") == [{"pr": "repo_a#2", "before": "bbbbbbb", "now": "ccccccc"}]
+    tw.publish_requirements(FakeApi(), tmp_path, watcher)
+    assert posted["items"]["DT-4"]["pr_new_commits"][0]["pr"] == "repo_a#2"
