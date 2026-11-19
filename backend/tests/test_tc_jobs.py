@@ -1126,3 +1126,20 @@ def test_fix_checks_drop_grep_rc_on_a_folder_but_keep_single_file_counts(tmp_pat
     assert [c["what"] for c in tw.fix_checks(tmp_path, "DT-2")] == ["ok file", "ok folder"]
     prompt = tw.build_prompt({"dt": "DT-2", "stage": "generate", "id": "j", "params": {}}, tmp_path / "r.json")
     assert "Never `grep -rc` on a folder" in prompt
+
+
+def test_device_caused_failure_is_inconclusive_not_failed(tmp_path):
+    d = tmp_path / "out" / "DT-9"
+    d.mkdir(parents=True)
+    (d / "TC_1_A.py").write_text("a")
+    (d / "TC_2_B.py").write_text("b")
+    job = {"dt": "DT-9", "id": "j1", "params": {"mode": "fixed", "device_id": "123456"}}
+    res = {"outcome": "no", "fixed_result": "fail", "reason_category": "device", "reason": "no DHUB attached",
+           "testcases": ["TC_1_A.py", "TC_2_B.py"]}
+    final, extra = tw.judge_validation(tmp_path, job, res, "no")
+    assert final == "inconclusive" and extra["fixed_result"] == "na"
+    assert set(extra["testcase_status"].values()) == {"na"}                       # not "failed"
+    assert any("no DHUB attached" in x for x in tw.remaining_items(tmp_path, "DT-9", job["params"], dict(res, **extra), final))
+    # the same failure blamed on the testcase is still a failure
+    final, extra = tw.judge_validation(tmp_path, job, dict(res, reason_category="testcase"), "no")
+    assert final == "no" and set(extra["testcase_status"].values()) == {"failed"}

@@ -271,6 +271,11 @@ def judge_validation(root: Path, job: dict[str, Any], result: dict[str, Any], ou
     mode = validate_mode(params)
     names = sorted(file_shas(root, dt))
     sides = testcase_sides(params, result, outcome, names)
+    # A failure that Claude traced to the device or its environment (no camera hub attached, a service not set up)
+    # says nothing about the testcase: it is "not applicable here", never "failed".
+    env_fail = outcome == "no" and result.get("reason_category") in ("device", "environment")
+    if env_fail:
+        sides = {n: ("na" if f == "fail" else f, u) for n, (f, u) in sides.items()}
     new = apply_sides(read_state(root, dt), params, str(job.get("id", "")), sides)
     status = {n: testcase_status(new[n]) for n in names if n in new}
     if any(f == "fail" for f, _ in sides.values()):
@@ -288,6 +293,9 @@ def judge_validation(root: Path, job: dict[str, Any], result: dict[str, Any], ou
     else:
         final = outcome
     fixed, unfixed = run_sides(params, result, outcome)
+    if env_fail:
+        final = "inconclusive"
+        fixed = "na" if fixed == "fail" else fixed
     return final, {"fixed_result": fixed, "unfixed_result": unfixed,
                    "state": {"fixed": bool(new) and all(e.get("fixed") for e in new.values()),
                              "unfixed": bool(new) and all(e.get("unfixed") for e in new.values())},
@@ -311,7 +319,8 @@ def remaining_items(root: Path, dt: str, params: dict[str, Any], result: dict[st
     Worked out here from the files and the run's parameters; Claude may add its own lines
     under `remaining` (platforms not exercised, scenarios skipped at a gate, ...)."""
     items: list[str] = []
-    if outcome in ("no", "partial") and result.get("reason"):
+    env_stop = outcome == "inconclusive" and result.get("reason_category") in ("device", "environment")
+    if (outcome in ("no", "partial") or env_stop) and result.get("reason"):
         cat = result.get("reason_category")
         items.append(f"Why: {'[' + cat + '] ' if cat else ''}{result['reason']}")
     elif outcome == "no":
@@ -821,7 +830,10 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "The regex is searched in the WHOLE output, so the command must print one short line: count with `grep -c` on ONE "
         "file, or `grep -rl <string> <dir> | wc -l` for a folder. Never `grep -rc` on a folder (it prints a `path:count` "
         "line per file, and any digit in a file name matches `[1-9]`). Anchor the regex (`^[1-9]`, `^active$`). "
-        "Use code the PR really changed (a config key or section it added, a string or md5 in a file it touched) so the "
+        "For EVERY hardware or state precondition your testcases rely on (an external camera hub attached, a feature or "
+        "service enabled, a paired accessory) add a check that proves it on the device, for example that a log or a "
+        "service state shows the feature is up, and never write in `needs` that hardware is not required unless you "
+        "verified it. Use code the PR really changed (a config key or section it added, a string or md5 in a file it touched) so the "
         "check separates the two builds, plus what both devices need (a service that must be active: fixed `match` and "
         "unfixed `match`). Base each on what you verified in the diff and on a device if you had one; leave out a check you "
         "cannot make reliable.")
