@@ -1007,9 +1007,13 @@ def test_unfixed_failure_for_the_wrong_reason_proves_nothing():
         {"testcase": "TC_2_B.py", "fixed_result": "pass", "unfixed_result": "fail", "unfixed_conclusive": False}]}
     s = tw.testcase_sides(params, result, "partial", names)
     assert s["TC_1_A.py"] == ("pass", "fail") and s["TC_2_B.py"] == ("pass", "na")
-    # no per-testcase flag, but Claude blames the device on a partial run: not counted either
-    r2 = {"fixed_result": "pass", "unfixed_result": "fail", "reason_category": "device"}
+    # run-wide flag false: not counted; "device" as a reason alone (e.g. no fixed device in the run) must NOT discount a failure
+    r2 = {"fixed_result": "pass", "unfixed_result": "fail", "unfixed_conclusive": False}
     assert tw.testcase_sides(params, r2, "partial", names)["TC_1_A.py"] == ("pass", "na")
+    r3 = {"fixed_result": "pass", "unfixed_result": "fail", "reason_category": "device"}
+    assert tw.testcase_sides(params, r3, "partial", names)["TC_1_A.py"] == ("pass", "fail")
+    only_unfixed = {"unfixed_result": "fail", "reason_category": "device"}                    # DT-5507's run
+    assert tw.testcase_sides({"mode": "unfixed", "unfixed_device_id": "222222"}, only_unfixed, "partial", ["TC_1_A.py"])["TC_1_A.py"] == ("", "fail")
     # a clean yes run still counts
     assert tw.testcase_sides(params, {"fixed_result": "pass", "unfixed_result": "fail"}, "yes", names)["TC_1_A.py"] == ("pass", "fail")
 

@@ -190,8 +190,9 @@ def testcase_sides(params: dict[str, Any], result: dict[str, Any], outcome: str,
     (or all of them) gets the run-wide result."""
     mode = validate_mode(params)
     wide_f, wide_u = run_sides(params, result, outcome)
-    if wide_u == "fail" and result.get("reason_category") == "device" and outcome != "yes":
-        wide_u = "na"                              # Claude blames the device: the failure proves nothing
+    run_conclusive = result.get("unfixed_conclusive")
+    if wide_u == "fail" and run_conclusive in (False, "false", "no"):
+        wide_u = "na"                              # Claude says it failed for another reason: it proves nothing
     norm = lambda v: str(v or "").lower() if str(v or "").lower() in ("pass", "fail", "na") else ""  # noqa: E731
     listed = result.get("testcase_results") if isinstance(result.get("testcase_results"), list) else []
     reported: dict[str, tuple[str, str]] = {}
@@ -200,8 +201,8 @@ def testcase_sides(params: dict[str, Any], result: dict[str, Any], outcome: str,
             f = norm(e.get("fixed_result")) if mode in ("fixed", "both") else ""
             u = norm(e.get("unfixed_result")) if mode in ("unfixed", "both") else ""
             conclusive = e.get("unfixed_conclusive")
-            if conclusive is None:                 # not said: trust the failure unless Claude blames the device
-                conclusive = not (result.get("reason_category") == "device" and outcome != "yes")
+            if conclusive is None:                 # not said for this testcase: the run-wide answer, else trust the failure
+                conclusive = result.get("unfixed_conclusive", True)
             if u == "fail" and conclusive in (False, "false", "no"):
                 u = "na"                           # failed, but not for the reason the fix addresses: proves nothing
             for n in names:
@@ -874,6 +875,7 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
                  "`\"reason_category\"` (one of the four words above) whenever the outcome is `no` or `partial`, and "
                  "`\"corrections\": [{\"testcase\": \"<file>\", \"what\": \"<what you changed>\", \"why\": \"<why the old "
                  "version was wrong>\"}]` for every change you made to a testcase (an empty list if none).\n"
+                 "When a device WITHOUT the fix is used, also add the run-wide `\"unfixed_conclusive\": true|false`: true only when the testcase(s) failed there at the step that checks the fix, because of the bug; false when it failed for another reason (service or binary missing, device not set up, wrong build). Never base it on the missing fixed-device run: a run without a fixed device says nothing about this flag. "
                  "Also report what happened on each device used in this run: `\"fixed_result\"` (device WITH the fix) and "
                  "`\"unfixed_result\"` (device WITHOUT the fix), each `\"pass\"`, `\"fail\"` or `\"na\"`. On the unfixed "
                  "device `\"fail\"` is the GOOD result: the testcase failed there because the bug is present. `\"pass\"` there "
