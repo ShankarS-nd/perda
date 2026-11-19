@@ -1377,8 +1377,8 @@ def run_job(api: Api, args: argparse.Namespace, job: dict[str, Any]) -> None:
         before = {"remote_sha": head}
     if stage in ("regenerate", "validate"):
         backup = backup_testcases(root, dt, jid)
-    if stage == "regenerate" and args.skill_dir is not None:
-        refresh_research(root, args.skill_dir, dt)
+    if stage in ("generate", "regenerate") and args.skill_dir is not None:
+        refresh_research(root, args.skill_dir, dt)      # PR snapshot = the state this run starts from
 
     work = root / "out" / dt / ".dashboard"
     work.mkdir(parents=True, exist_ok=True)
