@@ -44,6 +44,7 @@ interface TcRequirements {
   runs_on: string[]; na_on: string[]; needs: string[]; notes: string[]; testcases: string[];
   fixed_build: string; unfixed_build: string;
   device_checks?: { what: string; fixed: string; unfixed: string }[];
+  pr_snapshot?: Record<string, string>; pr_snapshot_at?: string;
   validation?: Record<string, { status: string; fixed_device: string; unfixed_device: string }>;
 }
 /** How one testcase stands: fully validated needs a pass with the fix AND the failure without it. */
@@ -70,6 +71,21 @@ function halfCount(names: string[], val: TcRequirements["validation"]) {
   const h = names.map((f) => halves(val?.[f]));
   return { post: h.filter((x) => x.post).length, pre: h.filter((x) => x.pre).length, total: names.length };
 }
+/** PRs whose status changed (or that were linked) since the testcases were generated: the testcases may no longer
+ *  match the fix. Compares the snapshot taken at the last Generate / Regenerate with Jira's list now. */
+interface PrChange { key: string; before: string; now: string }
+function prChanges(snapshot: Record<string, string> | undefined, prs: PullRequest[] | null | undefined): PrChange[] {
+  if (!snapshot || !Object.keys(snapshot).length || !prs) return [];
+  const out: PrChange[] = [];
+  for (const p of prs) {
+    const key = `${p.repo}${p.id}`, before = snapshot[key];
+    if (before === undefined) out.push({ key, before: "", now: p.status });
+    else if (before !== p.status) out.push({ key, before, now: p.status });
+  }
+  return out;
+}
+const prChangeText = (c: PrChange) =>
+  `${c.key}: ${c.before ? (PR_LABEL[c.before] ?? c.before).toLowerCase() : "not linked"} → ${(PR_LABEL[c.now] ?? c.now).toLowerCase()}`;
 interface WorkerState { online: boolean; name: string; last_seen: string }
 type Panel = { kind: "start"; stage: Stage; dt: string } | { kind: "job"; id: string };
 
@@ -715,6 +731,16 @@ function JobPanel({
                     {lastGenerate.result.testcases.map((f) => <p key={f} className="break-all font-mono text-[11.5px] text-gray-300">{f}</p>)}
                   </div>
                 )}
+                {(() => {
+                  const ch = prChanges(req?.pr_snapshot, prs);
+                  return ch.length ? (
+                    <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 ring-1 ring-inset ring-amber-500/25">
+                      <p className="font-medium">Pull requests changed since these testcases were generated</p>
+                      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">{ch.map((c) => <li key={c.key}>{prChangeText(c)}</li>)}</ul>
+                      <p className="mt-1 text-amber-200/80">The testcases may not match the fix as it is now. Run Regenerate after merge first.</p>
+                    </div>
+                  ) : null;
+                })()}
                 <div className="rounded-lg bg-sky-500/10 px-3 py-2 text-[12px] text-sky-100 ring-1 ring-inset ring-sky-500/25">
                   <p className="mb-1 font-medium">What you need to validate</p>
                   <ul className="list-disc space-y-1 pl-4 leading-snug">
@@ -815,6 +841,16 @@ function JobPanel({
                 </label>
               </>
             )}
+            {panel.stage === "include" && (() => {
+                  const ch = prChanges(req?.pr_snapshot, prs);
+                  return ch.length ? (
+                    <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 ring-1 ring-inset ring-amber-500/25">
+                      <p className="font-medium">Pull requests changed since these testcases were generated</p>
+                      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">{ch.map((c) => <li key={c.key}>{prChangeText(c)}</li>)}</ul>
+                      <p className="mt-1 text-amber-200/80">The testcases may not match the fix as it is now. Run Regenerate after merge first.</p>
+                    </div>
+                  ) : null;
+                })()}
             {panel.stage === "include" && !!req?.testcases.length && req.validation && (() => {
               const names = req.testcases, c = halfCount(names, req.validation);
               const lacks = (k: "post" | "pre") => names.filter((f) => !halves(req.validation![f])[k]).map(tcId);
@@ -1769,6 +1805,18 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                                     })}
                                   </span>
                                 )}
+                                {field(t.key, "generated_tcs") === "Yes" && (() => {
+                                  const ch = prChanges(reqs[t.key]?.pr_snapshot, prMap[t.key]);
+                                  const regen = runAction(t.key, "regenerate", "Regenerate after merge");
+                                  if (!ch.length) return null;
+                                  return (
+                                    <button onClick={regen?.onRun} disabled={!regen || !!regen.blocked}
+                                      title={`Pull requests changed since these testcases were generated:\n${ch.map(prChangeText).join("\n")}\nClick to regenerate after merge.`}
+                                      className="max-w-[190px] rounded-md bg-amber-500/15 px-1.5 py-0.5 text-left text-[11px] leading-tight text-amber-200 ring-1 ring-inset ring-amber-400/35 transition-colors hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-60">
+                                      ⟳ {ch.length} PR{ch.length > 1 ? "s" : ""} changed since generated: {ch.map((c) => `${c.key} ${(PR_LABEL[c.now] ?? c.now).toLowerCase()}`).join(", ")} · regenerate
+                                    </button>
+                                  );
+                                })()}
                               </div>
                             )}
                           </td>

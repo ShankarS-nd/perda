@@ -352,6 +352,9 @@ def clean_requirements(data: Any) -> dict[str, Any]:
         out[key] = [" ".join(str(x).split())[:400] for x in raw[:20] if str(x).strip()]
     for key in ("fixed_build", "unfixed_build"):
         out[key] = " ".join(str(data.get(key) or "").split())[:400]
+    snap = data.get("pr_snapshot") if isinstance(data.get("pr_snapshot"), dict) else {}
+    out["pr_snapshot"] = {str(k)[:120]: str(v).upper()[:12] for k, v in list(snap.items())[:40]}
+    out["pr_snapshot_at"] = str(data.get("pr_snapshot_at") or "")[:30]
     checks = data.get("device_checks") if isinstance(data.get("device_checks"), list) else []
     ok = ("match", "nomatch", "skip")
     out["device_checks"] = [

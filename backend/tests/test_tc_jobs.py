@@ -1159,3 +1159,34 @@ def test_both_halves_on_record_lift_a_half_run_partial_to_yes(tmp_path):
     assert tw.judge_validation(tmp_path, job2, res2, "partial")[0] == "yes"
     # a partial blamed on the testcase or the product is never lifted
     assert tw.judge_validation(tmp_path, job2, dict(res2, reason_category="testcase"), "partial")[0] == "partial"
+
+
+def test_pr_snapshot_comes_from_the_research_bundle_and_is_published(tmp_path):
+    d = tmp_path / "out" / "DT-7"
+    d.mkdir(parents=True)
+    (d / "research_bundle.json").write_text(json.dumps({"target_branch": "6.16_qa", "dev_status_prs": [
+        {"id": "#3757", "status": "open", "repository": "netradyne/nd_device_services"},
+        {"id": "#3710", "status": "MERGED", "repository": "netradyne/nd_device_services"},
+        {"id": "#2843", "status": "OPEN", "repository": "netradyne/nd_core_utils"}, {"status": "x"}]}))
+    snap, at = tw.pr_snapshot(tmp_path, "DT-7")
+    assert snap == {"nd_device_services#3757": "OPEN", "nd_device_services#3710": "MERGED", "nd_core_utils#2843": "OPEN"}
+    assert at.endswith("Z")
+    assert tw.pr_snapshot(tmp_path, "DT-8") == ({}, "")                        # no bundle: nothing, not an error
+    (d / "TC_1_A.py").write_text("x")
+    (d / "bug_analysis.json").write_text("{}")
+    req = tw.requirements(tmp_path, "DT-7")
+    assert req["pr_snapshot"] == snap
+    clean = tj.clean_requirements(dict(req, pr_snapshot={"r#1": "merged", "x" * 300: "OPEN", "bad": 5}))
+    assert clean["pr_snapshot"]["r#1"] == "MERGED" and all(len(k) <= 120 for k in clean["pr_snapshot"])
+    assert tj.clean_requirements({})["pr_snapshot"] == {}
+
+
+def test_refresh_research_only_runs_with_a_known_branch(tmp_path):
+    skill = tmp_path / "skill"
+    (skill / "scripts").mkdir(parents=True)
+    assert tw.refresh_research(tmp_path, skill, "DT-7") is False                # no bundle, no venv: skipped, no crash
+    d = tmp_path / "out" / "DT-7"
+    d.mkdir(parents=True)
+    (d / "research_bundle.json").write_text(json.dumps({"target_branch": "--evil"}))
+    assert tw.valid_branch_name("6.16_qa") and not tw.valid_branch_name("--evil") and not tw.valid_branch_name("a..b")
+    assert tw.refresh_research(tmp_path, skill, "DT-7") is False

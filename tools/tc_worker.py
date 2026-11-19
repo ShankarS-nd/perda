@@ -456,9 +456,50 @@ def requirements(root: Path, dt: str) -> dict[str, Any]:
         "fixed_build": " ".join(str(vr.get("fixed_build") or "").split())[:400],
         "unfixed_build": " ".join(str(vr.get("unfixed_build") or "").split())[:400],
         "testcases": [f.name for f in candidates(root, dt)],
+        "pr_snapshot": pr_snapshot(root, dt)[0], "pr_snapshot_at": pr_snapshot(root, dt)[1],
         "device_checks": [{"what": c["what"], "fixed": c["fixed"], "unfixed": c["unfixed"]} for c in fix_checks(root, dt)],
         "validation": validation_view(root, dt),
     }
+
+
+def valid_branch_name(name: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9._/\-]{1,200}", name)) and ".." not in name and not name.startswith("-")
+
+
+def pr_snapshot(root: Path, dt: str) -> tuple[dict[str, str], str]:
+    """Every PR linked to the ticket and its status when the evidence was last gathered
+    (research_bundle.json), keyed `<repo><id>` like the page's PR list, plus when that was."""
+    path = root / "out" / dt / "research_bundle.json"
+    try:
+        prs = json.loads(path.read_text()).get("dev_status_prs") or []
+        at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
+    except (OSError, ValueError, AttributeError):
+        return {}, ""
+    out = {}
+    for p in prs[:40] if isinstance(prs, list) else []:
+        if isinstance(p, dict) and p.get("id"):
+            repo = str(p.get("repository") or "").split("/")[-1]
+            out[f"{repo}{p['id']}"] = str(p.get("status") or "").upper()[:12]
+    return out, at
+
+
+def refresh_research(root: Path, skill_dir: Path, dt: str) -> bool:
+    """Gather the ticket's evidence again (PR list and statuses, diffs) so a regenerate compares with today's
+    state and the PR snapshot behind the page's "PRs changed" badge is current. Best effort."""
+    py, script = root / ".venv" / "bin" / "python3", skill_dir / "scripts" / "bugreg_research.py"
+    try:
+        branch = str(json.loads((root / "out" / dt / "research_bundle.json").read_text()).get("target_branch") or "")
+    except (OSError, ValueError):
+        return False
+    if not (py.exists() and script.exists() and branch and valid_branch_name(branch)):
+        return False
+    env = {**os.environ, "BUGREG_PROJECT_ROOT": str(root), "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        r = subprocess.run([str(py), str(script), dt, "--branch", branch, "--refresh"], cwd=root, env=env,
+                           capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        return r.returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
 
 
 def publish_requirements(api: "Api", root: Path) -> None:
@@ -1336,6 +1377,8 @@ def run_job(api: Api, args: argparse.Namespace, job: dict[str, Any]) -> None:
         before = {"remote_sha": head}
     if stage in ("regenerate", "validate"):
         backup = backup_testcases(root, dt, jid)
+    if stage == "regenerate" and args.skill_dir is not None:
+        refresh_research(root, args.skill_dir, dt)
 
     work = root / "out" / dt / ".dashboard"
     work.mkdir(parents=True, exist_ok=True)
