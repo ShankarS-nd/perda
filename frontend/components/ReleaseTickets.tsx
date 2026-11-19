@@ -45,6 +45,7 @@ interface TcRequirements {
   fixed_build: string; unfixed_build: string;
   device_checks?: { what: string; fixed: string; unfixed: string }[];
   pr_snapshot?: Record<string, string>; pr_snapshot_at?: string;
+  pr_coverage?: Record<string, { used: boolean | null; why: string; by: string }>;
   validation?: Record<string, { status: string; fixed_device: string; unfixed_device: string }>;
 }
 /** How one testcase stands: fully validated needs a pass with the fix AND the failure without it. */
@@ -86,6 +87,17 @@ function prChanges(snapshot: Record<string, string> | undefined, prs: PullReques
 }
 const prChangeText = (c: PrChange) =>
   `${c.key}: ${c.before ? (PR_LABEL[c.before] ?? c.before).toLowerCase() : "not linked"} → ${(PR_LABEL[c.now] ?? c.now).toLowerCase()}`;
+/** Whether the testcases were built from this PR. `used` comes from Claude's own list (`by: claude`); for older tickets only
+ *  the evidence bundle is known, which can say "its diff was read" but never "it was left out". */
+function PrUsed({ cov, status }: { cov?: { used: boolean | null; why: string; by: string }; status: string }) {
+  if (!cov || cov.used === null) return null;
+  const tip = cov.used
+    ? `The testcases were built from this PR.${cov.why ? `\n${cov.why}` : ""}`
+    : `Not in the testcases.${cov.why ? `\n${cov.why}` : ""}${status === "OPEN" ? "\nStill open: regenerate after it merges." : ""}`;
+  const cls = cov.used ? "bg-emerald-500/15 text-emerald-200 ring-emerald-400/35"
+    : status === "DECLINED" ? "bg-white/[0.05] text-gray-400 ring-white/[0.1]" : "bg-amber-500/15 text-amber-200 ring-amber-400/35";
+  return <span title={tip} className={`whitespace-nowrap rounded px-1 py-px text-[10px] ring-1 ring-inset ${cls}`}>{cov.used ? "✓ in TCs" : "✕ not in TCs"}</span>;
+}
 interface WorkerState { online: boolean; name: string; last_seen: string }
 type Panel = { kind: "start"; stage: Stage; dt: string } | { kind: "job"; id: string };
 
@@ -1768,6 +1780,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                                     <a href={pr.url} target="_blank" rel="noreferrer" title={`${pr.title}${pr.target ? ` → ${pr.target}` : ""}${pr.author ? ` · ${pr.author}` : ""}`} className="whitespace-nowrap text-indigo-300 hover:text-indigo-200 hover:underline">
                                       {pr.repo ? `${pr.repo}${pr.id}` : pr.id}
                                     </a>
+                                    {field(t.key, "generated_tcs") === "Yes" && <PrUsed cov={reqs[t.key]?.pr_coverage?.[`${pr.repo}${pr.id}`]} status={pr.status} />}
                                   </div>
                                 ))}
                               </div>

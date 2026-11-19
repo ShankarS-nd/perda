@@ -1190,3 +1190,27 @@ def test_refresh_research_only_runs_with_a_known_branch(tmp_path):
     (d / "research_bundle.json").write_text(json.dumps({"target_branch": "--evil"}))
     assert tw.valid_branch_name("6.16_qa") and not tw.valid_branch_name("--evil") and not tw.valid_branch_name("a..b")
     assert tw.refresh_research(tmp_path, skill, "DT-7") is False
+
+
+def test_pr_coverage_prefers_claudes_list_and_falls_back_to_the_bundle(tmp_path):
+    d = tmp_path / "out" / "DT-6"
+    d.mkdir(parents=True)
+    (d / "research_bundle.json").write_text(json.dumps({"dev_status_prs": [
+        {"id": "#10", "status": "MERGED", "repository": "netradyne/repo_a", "diff": "commit abc"},
+        {"id": "#11", "status": "OPEN", "repository": "netradyne/repo_a", "diff": ""},
+        {"id": "#12", "status": "MERGED", "repository": "netradyne/repo_b", "diff": "x"}]}))
+    (d / "bug_analysis.json").write_text(json.dumps({"pr_coverage": [
+        {"pr": "netradyne/repo_b#12", "used": False, "why": "a revert"},
+        {"pr": "repo_a#11", "used": True, "why": "read over git"},
+        {"pr": "junk", "used": True}, {"pr": "repo_c#1", "used": "yes"}]}))
+    cov = tw.pr_coverage(tmp_path, "DT-6")
+    assert cov["repo_b#12"] == {"used": False, "why": "a revert", "by": "claude"}
+    assert cov["repo_a#11"]["used"] is True and cov["repo_a#11"]["by"] == "claude"
+    assert cov["repo_a#10"] == {"used": True, "why": "its diff was gathered with the evidence", "by": "bundle"}
+    assert "repo_c#1" not in cov and len(cov) == 3                              # non-boolean `used` and junk refs are ignored
+    (d / "bug_analysis.json").write_text("{}")
+    assert tw.pr_coverage(tmp_path, "DT-6")["repo_a#11"] == {"used": None, "why": "", "by": "bundle"}   # unknown, not "left out"
+    clean = tj.clean_requirements({"pr_coverage": {"r#1": {"used": "maybe", "why": "w" * 500, "by": "x"}}})
+    assert clean["pr_coverage"]["r#1"] == {"used": None, "why": "w" * 200, "by": "bundle"}
+    prompt = tw.build_prompt({"dt": "DT-6", "stage": "generate", "id": "j", "params": {}}, tmp_path / "r.json")
+    assert '"pr_coverage"' in prompt and "EVERY pull request" in prompt

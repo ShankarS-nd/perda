@@ -456,6 +456,7 @@ def requirements(root: Path, dt: str) -> dict[str, Any]:
         "fixed_build": " ".join(str(vr.get("fixed_build") or "").split())[:400],
         "unfixed_build": " ".join(str(vr.get("unfixed_build") or "").split())[:400],
         "testcases": [f.name for f in candidates(root, dt)],
+        "pr_coverage": pr_coverage(root, dt),
         "pr_snapshot": pr_snapshot(root, dt)[0], "pr_snapshot_at": pr_snapshot(root, dt)[1],
         "device_checks": [{"what": c["what"], "fixed": c["fixed"], "unfixed": c["unfixed"]} for c in fix_checks(root, dt)],
         "validation": validation_view(root, dt),
@@ -500,6 +501,36 @@ def refresh_research(root: Path, skill_dir: Path, dt: str) -> bool:
         return r.returncode == 0
     except (subprocess.SubprocessError, OSError):
         return False
+
+
+PR_REF = re.compile(r"([\w.\-]+?)(?:#|/pull/|/)(\d+)\s*$")
+
+
+def pr_coverage(root: Path, dt: str) -> dict[str, dict[str, Any]]:
+    """Which linked PRs the testcases were built from. `pr_coverage` in bug_analysis.json is what Claude says
+    (used: true/false and why); for a PR it did not list, the evidence bundle tells at least whether its diff
+    was gathered (used true) or not (unknown: null)."""
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        raw = json.loads((root / "out" / dt / "bug_analysis.json").read_text()).get("pr_coverage")
+    except (OSError, ValueError, AttributeError):
+        raw = None
+    for e in raw[:40] if isinstance(raw, list) else []:
+        m = PR_REF.search(str(e.get("pr") or "")) if isinstance(e, dict) else None
+        if m and isinstance(e.get("used"), bool):
+            out[f"{m.group(1)}#{m.group(2)}"] = {"used": e["used"], "why": " ".join(str(e.get("why") or "").split())[:200], "by": "claude"}
+    try:
+        bundle = json.loads((root / "out" / dt / "research_bundle.json").read_text()).get("dev_status_prs") or []
+    except (OSError, ValueError, AttributeError):
+        bundle = []
+    for p in bundle[:40] if isinstance(bundle, list) else []:
+        if isinstance(p, dict) and p.get("id"):
+            key = f"{str(p.get('repository') or '').split('/')[-1]}{p['id']}"
+            if key not in out:
+                has = bool(str(p.get("diff") or "").strip())
+                out[key] = {"used": True if has else None,
+                            "why": "its diff was gathered with the evidence" if has else "", "by": "bundle"}
+    return out
 
 
 def publish_requirements(api: "Api", root: Path) -> None:
@@ -888,6 +919,12 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "`git log pr/<number>`. Whether a PR is merged: its head commit is an ancestor of the base branch on origin "
         "(`git merge-base --is-ancestor pr/<number> origin/<base branch>`). Read every linked PR this way before "
         "deciding the fix scope; only report `failed` for an unreadable PR if this also fails, and say what you tried.")
+    req_note += (
+        "\n\nALSO add `\"pr_coverage\"` to out/" + dt + "/bug_analysis.json: one entry for EVERY pull request linked to the "
+        "ticket (open, merged, declined, other branches, reverts): `{\"pr\": \"<repo>#<number>\", \"used\": true|false, "
+        "\"why\": \"short reason\"}`. `used` is true only when you read that PR's diff and the testcases cover its change. "
+        "False when you could not read it, it is still open and unreadable, declined, a revert, for another branch, or "
+        "unrelated to this behaviour; say which in `why`. The dashboard shows each PR as in or not in the testcases.")
     if stage == "generate":
         return head + common + req_note + pr_note
     if stage == "regenerate":
