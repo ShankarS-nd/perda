@@ -46,6 +46,7 @@ interface TcRequirements {
   device_checks?: { what: string; fixed: string; unfixed: string }[];
   pr_snapshot?: Record<string, string>; pr_snapshot_at?: string;
   pr_coverage?: Record<string, { used: boolean | null; why: string; by: string }>;
+  pr_new_commits?: { pr: string; before: string; now: string }[];
   validation?: Record<string, { status: string; fixed_device: string; unfixed_device: string }>;
 }
 /** How one testcase stands: fully validated needs a pass with the fix AND the failure without it. */
@@ -97,6 +98,14 @@ function PrUsed({ cov, status }: { cov?: { used: boolean | null; why: string; by
   const cls = cov.used ? "bg-emerald-500/15 text-emerald-200 ring-emerald-400/35"
     : status === "DECLINED" ? "bg-white/[0.05] text-gray-400 ring-white/[0.1]" : "bg-amber-500/15 text-amber-200 ring-amber-400/35";
   return <span title={tip} className={`whitespace-nowrap rounded px-1 py-px text-[10px] ring-1 ring-inset ${cls}`}>{cov.used ? "✓ in TCs" : "✕ not in TCs"}</span>;
+}
+/** Everything that may have made the testcases stale: a PR whose status changed, and an open PR that got new commits. */
+function prAlerts(req: TcRequirements | undefined, prs: PullRequest[] | null | undefined): { lines: string[]; short: string[] } {
+  const ch = prChanges(req?.pr_snapshot, prs), cm = req?.pr_new_commits ?? [];
+  return {
+    lines: [...ch.map(prChangeText), ...cm.map((c) => `${c.pr}: new commits since generated (${c.before} → ${c.now})`)],
+    short: [...ch.map((c) => `${c.key} ${(PR_LABEL[c.now] ?? c.now).toLowerCase()}`), ...cm.map((c) => `${c.pr} new commits`)],
+  };
 }
 interface WorkerState { online: boolean; name: string; last_seen: string }
 type Panel = { kind: "start"; stage: Stage; dt: string } | { kind: "job"; id: string };
@@ -744,11 +753,11 @@ function JobPanel({
                   </div>
                 )}
                 {(() => {
-                  const ch = prChanges(req?.pr_snapshot, prs);
-                  return ch.length ? (
+                  const al = prAlerts(req, prs);
+                  return al.lines.length ? (
                     <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 ring-1 ring-inset ring-amber-500/25">
                       <p className="font-medium">Pull requests changed since these testcases were generated</p>
-                      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">{ch.map((c) => <li key={c.key}>{prChangeText(c)}</li>)}</ul>
+                      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">{al.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
                       <p className="mt-1 text-amber-200/80">The testcases may not match the fix as it is now. Run Regenerate after merge first.</p>
                     </div>
                   ) : null;
@@ -854,11 +863,11 @@ function JobPanel({
               </>
             )}
             {panel.stage === "include" && (() => {
-                  const ch = prChanges(req?.pr_snapshot, prs);
-                  return ch.length ? (
+                  const al = prAlerts(req, prs);
+                  return al.lines.length ? (
                     <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 ring-1 ring-inset ring-amber-500/25">
                       <p className="font-medium">Pull requests changed since these testcases were generated</p>
-                      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">{ch.map((c) => <li key={c.key}>{prChangeText(c)}</li>)}</ul>
+                      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">{al.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
                       <p className="mt-1 text-amber-200/80">The testcases may not match the fix as it is now. Run Regenerate after merge first.</p>
                     </div>
                   ) : null;
@@ -1819,14 +1828,14 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                                   </span>
                                 )}
                                 {field(t.key, "generated_tcs") === "Yes" && (() => {
-                                  const ch = prChanges(reqs[t.key]?.pr_snapshot, prMap[t.key]);
+                                  const al = prAlerts(reqs[t.key], prMap[t.key]);
                                   const regen = runAction(t.key, "regenerate", "Regenerate after merge");
-                                  if (!ch.length) return null;
+                                  if (!al.lines.length) return null;
                                   return (
                                     <button onClick={regen?.onRun} disabled={!regen || !!regen.blocked}
-                                      title={`Pull requests changed since these testcases were generated:\n${ch.map(prChangeText).join("\n")}\nClick to regenerate after merge.`}
+                                      title={`Changed since these testcases were generated:\n${al.lines.join("\n")}\nClick to regenerate after merge.`}
                                       className="max-w-[190px] rounded-md bg-amber-500/15 px-1.5 py-0.5 text-left text-[11px] leading-tight text-amber-200 ring-1 ring-inset ring-amber-400/35 transition-colors hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-60">
-                                      ⟳ {ch.length} PR{ch.length > 1 ? "s" : ""} changed since generated: {ch.map((c) => `${c.key} ${(PR_LABEL[c.now] ?? c.now).toLowerCase()}`).join(", ")} · regenerate
+                                      ⟳ {al.short.length} change{al.short.length > 1 ? "s" : ""} since generated: {al.short.join(", ")} · regenerate
                                     </button>
                                   );
                                 })()}

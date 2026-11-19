@@ -352,6 +352,10 @@ def clean_requirements(data: Any) -> dict[str, Any]:
         out[key] = [" ".join(str(x).split())[:400] for x in raw[:20] if str(x).strip()]
     for key in ("fixed_build", "unfixed_build"):
         out[key] = " ".join(str(data.get(key) or "").split())[:400]
+    nc = data.get("pr_new_commits") if isinstance(data.get("pr_new_commits"), list) else []
+    out["pr_new_commits"] = [
+        {"pr": str(c.get("pr") or "")[:120], "before": str(c.get("before") or "")[:12], "now": str(c.get("now") or "")[:12]}
+        for c in nc[:20] if isinstance(c, dict) and c.get("pr")]
     cov = data.get("pr_coverage") if isinstance(data.get("pr_coverage"), dict) else {}
     out["pr_coverage"] = {
         str(k)[:120]: {"used": v.get("used") if isinstance(v.get("used"), bool) else None,

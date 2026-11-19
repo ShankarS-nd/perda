@@ -533,11 +533,67 @@ def pr_coverage(root: Path, dt: str) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _heads_path(root: Path, dt: str) -> Path:
+    return root / "out" / dt / ".dashboard" / "pr_heads.json"
+
+
+def open_pr_refs(root: Path, dt: str) -> dict[str, tuple[str, str]]:
+    """The ticket's still-open PRs from the evidence bundle: key -> (repo, number)."""
+    out: dict[str, tuple[str, str]] = {}
+    snap, _ = pr_snapshot(root, dt)
+    for key, status in snap.items():
+        m = re.fullmatch(r"([\w.\-]+)#(\d+)", key)
+        if m and status in ("OPEN", "DRAFT") and len(out) < 8:
+            out[key] = (m.group(1), m.group(2))
+    return out
+
+
+def current_pr_heads(root: Path, dt: str, keys: list[str] | None = None) -> dict[str, str]:
+    out = {}
+    for key, (repo, number) in open_pr_refs(root, dt).items():
+        if keys is not None and key not in keys:
+            continue
+        repo_dir = root / "repos" / repo
+        if (repo_dir / ".git").exists():
+            sha = remote_ref_sha(repo_dir, f"refs/pull/{number}/head")
+            if sha:
+                out[key] = sha
+    return out
+
+
+def record_pr_heads(root: Path, dt: str) -> dict[str, str]:
+    """Remember each open PR's head commit now: the code a Generate / Regenerate run starts from."""
+    heads = current_pr_heads(root, dt)
+    path = _heads_path(root, dt)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "heads": heads}, indent=1) + "\n")
+    except OSError:
+        pass
+    return heads
+
+
+def pr_new_commits(root: Path, dt: str) -> list[dict[str, str]]:
+    """Open PRs that got new commits since the testcases were generated. With no record yet, tracking starts now."""
+    try:
+        base = json.loads(_heads_path(root, dt).read_text()).get("heads") or {}
+    except (OSError, ValueError, AttributeError):
+        record_pr_heads(root, dt)
+        return []
+    if not isinstance(base, dict) or not base:
+        record_pr_heads(root, dt)                    # nothing recorded last time (remote unreachable): try again
+        return []
+    now = current_pr_heads(root, dt, list(base))
+    return [{"pr": k, "before": str(base[k])[:7], "now": now[k][:7]}
+            for k in sorted(base) if k in now and now[k] != base[k]]
+
+
 def publish_requirements(api: "Api", root: Path) -> None:
     items = {}
     for d in sorted((root / "out").glob("*-*")):
         if DT_RE.fullmatch(d.name) and (d / "bug_analysis.json").is_file() and any(d.glob("TC_*.py")):
             items[d.name] = requirements(root, d.name)
+            items[d.name]["pr_new_commits"] = pr_new_commits(root, d.name)
     if items:
         try:
             api.post("/tc-worker/requirements", {"items": items})
@@ -1082,6 +1138,22 @@ def remote_sha(repo: Path, branch: str) -> str:
     return ""
 
 
+def remote_ref_sha(repo: Path, ref: str) -> str:
+    """Commit a ref (for example refs/pull/12/head) points at on the remote, or ""."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=15"}
+    for target in remote_targets(repo):
+        try:
+            r = subprocess.run(["git", "ls-remote", target, ref], cwd=repo, capture_output=True, text=True,
+                               timeout=30, env=env, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if r.returncode == 0 and len(parts) == 2 and parts[1] == ref and re.fullmatch(r"[0-9a-f]{40}", parts[0]):
+                return parts[0]
+    return ""
+
+
 ALLOWED_PUSH_PATHS = ("Test_Automation_Framework/src/test_cases/", "Test_Automation_Framework/main_db.xlsx")
 
 
@@ -1416,6 +1488,7 @@ def run_job(api: Api, args: argparse.Namespace, job: dict[str, Any]) -> None:
         backup = backup_testcases(root, dt, jid)
     if stage in ("generate", "regenerate") and args.skill_dir is not None:
         refresh_research(root, args.skill_dir, dt)      # PR snapshot = the state this run starts from
+        record_pr_heads(root, dt)                       # and the code of each open PR it starts from
 
     work = root / "out" / dt / ".dashboard"
     work.mkdir(parents=True, exist_ok=True)

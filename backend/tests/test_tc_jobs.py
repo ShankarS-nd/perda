@@ -1214,3 +1214,26 @@ def test_pr_coverage_prefers_claudes_list_and_falls_back_to_the_bundle(tmp_path)
     assert clean["pr_coverage"]["r#1"] == {"used": None, "why": "w" * 200, "by": "bundle"}
     prompt = tw.build_prompt({"dt": "DT-6", "stage": "generate", "id": "j", "params": {}}, tmp_path / "r.json")
     assert '"pr_coverage"' in prompt and "EVERY pull request" in prompt
+
+
+def test_new_commits_on_an_open_pr_are_detected_against_the_recorded_head(tmp_path, monkeypatch):
+    d = tmp_path / "out" / "DT-5"
+    d.mkdir(parents=True)
+    (d / "research_bundle.json").write_text(json.dumps({"dev_status_prs": [
+        {"id": "#7", "status": "OPEN", "repository": "o/repo_a", "diff": "x"},
+        {"id": "#8", "status": "MERGED", "repository": "o/repo_a", "diff": "x"}]}))
+    (tmp_path / "repos" / "repo_a" / ".git").mkdir(parents=True)
+    sha1, sha2 = "a" * 40, "b" * 40
+    heads = {"refs/pull/7/head": sha1}
+    monkeypatch.setattr(tw, "remote_ref_sha", lambda repo, ref: heads.get(ref, ""))
+    assert list(tw.open_pr_refs(tmp_path, "DT-5")) == ["repo_a#7"]                  # merged PRs are not tracked
+    assert tw.pr_new_commits(tmp_path, "DT-5") == []                                # no record yet: tracking starts now
+    assert json.loads(tw._heads_path(tmp_path, "DT-5").read_text())["heads"] == {"repo_a#7": sha1}
+    assert tw.pr_new_commits(tmp_path, "DT-5") == []                                # unchanged
+    heads["refs/pull/7/head"] = sha2                                                # someone pushes to the PR
+    assert tw.pr_new_commits(tmp_path, "DT-5") == [{"pr": "repo_a#7", "before": "aaaaaaa", "now": "bbbbbbb"}]
+    heads.clear()                                                                   # remote unreachable: not a change
+    assert tw.pr_new_commits(tmp_path, "DT-5") == []
+    assert tw.record_pr_heads(tmp_path, "DT-5") == {}
+    clean = tj.clean_requirements({"pr_new_commits": [{"pr": "r#1", "before": "a" * 40, "now": "b"}, {"x": 1}]})
+    assert clean["pr_new_commits"] == [{"pr": "r#1", "before": "a" * 12, "now": "b"}]
