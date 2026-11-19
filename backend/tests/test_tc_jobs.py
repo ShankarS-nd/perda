@@ -1100,3 +1100,11 @@ def test_include_new_branch_prompt_and_result_check(tmp_path, monkeypatch):
     assert st == "failed" and "my-name" in msg                                       # asked for a name, got another
     assert tw.verify(tmp_path, job, dict(r, branch="my-name"))[0] == "done"
     assert tw.verify(tmp_path, plain, r)[0] == "done"                                # generated name: any valid branch
+
+
+def test_generate_and_regenerate_prompts_say_how_to_read_a_pr_without_the_api(tmp_path):
+    for stage in ("generate", "regenerate"):
+        prompt = tw.build_prompt({"dt": "DT-1", "stage": stage, "id": "j", "params": {}}, tmp_path / "r.json")
+        assert "refs/pull/<number>/head" in prompt and "is-ancestor" in prompt
+    val = tw.build_prompt({"dt": "DT-1", "stage": "validate", "id": "j", "params": {"mode": "fixed", "device_id": "123456"}}, tmp_path / "r.json")
+    assert "refs/pull/" not in val                     # only where PRs are read

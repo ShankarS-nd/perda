@@ -819,10 +819,18 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "check separates the two builds, plus what both devices need (a service that must be active: fixed `match` and "
         "unfixed `match`). Base each on what you verified in the diff and on a device if you had one; leave out a check you "
         "cannot make reliable.")
+    pr_note = (
+        "\n\nReading pull requests: `gh` is not installed and GITHUB_TOKEN is usually invalid, so the GitHub API often "
+        "fails. That is NOT a reason to give up on a PR. Git over SSH works: in the PR's repo under repos/, run "
+        "`git fetch origin refs/pull/<number>/head:refs/remotes/pr/<number>` (also `git fetch origin <base branch>`), "
+        "then read it with `git diff $(git merge-base pr/<number> origin/<base branch>) pr/<number>` and "
+        "`git log pr/<number>`. Whether a PR is merged: its head commit is an ancestor of the base branch on origin "
+        "(`git merge-base --is-ancestor pr/<number> origin/<base branch>`). Read every linked PR this way before "
+        "deciding the fix scope; only report `failed` for an unreadable PR if this also fails, and say what you tried.")
     if stage == "generate":
-        return head + common + req_note
+        return head + common + req_note + pr_note
     if stage == "regenerate":
-        return head + req_note + common.replace(
+        return head + req_note + pr_note + common.replace(
             "for the `regenerate` stage", "(\"Regenerate after merge\") for the `regenerate` stage") + (
             "\n\nThe testcases already exist in out/" + dt + "/. Re-check them against the fix as it is now, "
             "change only what the merged code makes wrong or incomplete, and change nothing if they are still right. "
