@@ -1327,3 +1327,16 @@ def test_details_are_sanitised_stored_and_only_sent_when_changed(tmp_path, monke
     tw.publish_details(FakeApi(), tmp_path)
     tw.publish_details(FakeApi(), tmp_path)                                                        # unchanged: nothing sent
     assert sent == ["/tc-worker/details"]
+
+
+def test_details_stored_before_a_new_field_still_load_with_it():
+    import database as dbm
+    conn = dbm._connect()
+    try:
+        conn.execute("INSERT OR REPLACE INTO tc_details (dt, data_json, updated_at) VALUES ('DT-77', ?, 'x')",
+                     (json.dumps({"plain": {"problem": "old row", "fix": "f", "how_tests_tell": "h", "not_covered": []}}),))
+        conn.commit()
+    finally:
+        conn.close()
+    got = tj.get_details("DT-77")
+    assert got["plain"]["problem"] == "old row" and got["plain"]["changes"] == [] and got["prs"] == [] and got["technical"] == []

@@ -586,7 +586,8 @@ function TicketDetails({ dt, ticket, req, prs, onClose, onRegenerate }: {
 
   const alerts = prAlerts(req, prs);
   const pl = data?.plain;
-  const written = !!(pl && (pl.problem || pl.fix || pl.changes.length || pl.how_tests_tell));
+  const changes = pl?.changes ?? [], notCovered = pl?.not_covered ?? [];
+  const written = !!(pl && (pl.problem || pl.fix || changes.length || pl.how_tests_tell));
   const Block = ({ title, children }: { title: string; children: React.ReactNode }) => (
     <section className="mb-5"><h4 className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-indigo-300/80">{title}</h4>{children}</section>
   );
@@ -618,16 +619,16 @@ function TicketDetails({ dt, ticket, req, prs, onClose, onRegenerate }: {
           {data && written && pl && (
             <>
               {pl.problem && <Block title="What was going wrong"><Text>{pl.problem}</Text></Block>}
-              {pl.changes.length > 0 && (
+              {changes.length > 0 && (
                 <Block title="What was changed">
-                  <ul className="list-disc space-y-1.5 pl-5 text-[14.5px] leading-relaxed text-gray-100">{pl.changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+                  <ul className="list-disc space-y-1.5 pl-5 text-[14.5px] leading-relaxed text-gray-100">{changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
                 </Block>
               )}
               {pl.fix && <Block title="So now"><Text>{pl.fix}</Text></Block>}
               {pl.how_tests_tell && <Block title="How you can tell it is fixed"><Text>{pl.how_tests_tell}</Text></Block>}
-              {pl.not_covered.length > 0 && (
+              {notCovered.length > 0 && (
                 <Block title="What is not checked">
-                  <ul className="list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-gray-300">{pl.not_covered.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                  <ul className="list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-gray-300">{notCovered.map((x, i) => <li key={i}>{x}</li>)}</ul>
                 </Block>
               )}
             </>
@@ -638,21 +639,21 @@ function TicketDetails({ dt, ticket, req, prs, onClose, onRegenerate }: {
               {onRegenerate && <button onClick={onRegenerate} className="mt-2 rounded-md px-2.5 py-1 text-[12px] text-sky-50 ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/20">Regenerate after merge</button>}
             </div>
           )}
-          {data && data.prs.length > 0 && (
+          {data && (data.prs ?? []).length > 0 && (
             <p className="mt-2 border-t border-white/[0.07] pt-3 text-[11.5px] leading-relaxed text-gray-500">
               Based on:{" "}
-              {data.prs.map((p, i) => (
+              {(data.prs ?? []).map((p, i) => (
                 <span key={p.key} title={p.why || undefined}>
-                  <span className="font-mono">{p.key}</span> ({(PR_LABEL[p.status] ?? p.status).toLowerCase()}{p.used === true ? ", used" : p.used === false ? ", not used" : ""}){i < data.prs.length - 1 ? " · " : ""}
+                  <span className="font-mono">{p.key}</span> ({(PR_LABEL[p.status] ?? p.status).toLowerCase()}{p.used === true ? ", used" : p.used === false ? ", not used" : ""}){i < (data.prs ?? []).length - 1 ? " · " : ""}
                 </span>
               ))}
             </p>
           )}
-          {data && data.technical.length > 0 && (
+          {data && (data.technical ?? []).length > 0 && (
             <details className="mt-3 text-[12px] text-gray-500">
               <summary className="cursor-pointer select-none hover:text-gray-300">Engineer's notes (technical, optional)</summary>
               <div className="mt-2 space-y-2.5">
-                {data.technical.map((t, i) => (
+                {(data.technical ?? []).map((t, i) => (
                   <section key={i}><h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{t.label}</h4>
                     <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-gray-400">{t.text}</p></section>
                 ))}

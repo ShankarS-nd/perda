@@ -420,7 +420,7 @@ def get_details(dt: str) -> dict[str, Any]:
         conn.close()
     if not row:
         raise JobError("The worker has not sent the details of this ticket yet. It does so every few minutes.", 404)
-    return {**json.loads(row["data_json"]), "updated_at": row["updated_at"]}
+    return {**clean_details(json.loads(row["data_json"])), "updated_at": row["updated_at"]}   # old rows get any new field
 
 
 REQ_LISTS = ("runs_on", "na_on", "needs", "notes", "testcases")
