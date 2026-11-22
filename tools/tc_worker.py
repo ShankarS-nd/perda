@@ -707,6 +707,7 @@ def ticket_details(root: Path, dt: str) -> dict[str, Any]:
         "analysis_at": at, "target_branch": str(bundle.get("target_branch") or a.get("branch") or ""),
         "confidence": conf if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
         "plain": {"problem": plain.get("problem") or "", "fix": plain.get("fix") or "",
+                  "changes": [str(x) for x in plain.get("changes", [])] if isinstance(plain.get("changes"), list) else [],
                   "how_tests_tell": plain.get("how_tests_tell") or "",
                   "not_covered": [str(x) for x in plain.get("not_covered", [])] if isinstance(plain.get("not_covered"), list) else []},
         "tests": tests, "prs": prs,
@@ -1118,16 +1119,20 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "ticket (open, merged, declined, other branches, reverts): `{\"pr\": \"<repo>#<number>\", \"used\": true|false, "
         "\"why\": \"short reason\"}`. `used` is true only when you read that PR's diff and the testcases cover its change. "
         "False when you could not read it, it is still open and unreadable, declined, a revert, for another branch, or "
-        "unrelated to this behaviour; say which in `why`. The dashboard shows each PR as in or not in the testcases. Also give each "
-        "entry `\"summary\"` (what that PR changes, in plain words, one to three sentences) and `\"files\"` (up to six key files it touches).")
+        "unrelated to this behaviour; say which in `why`. The dashboard shows each PR as in or not in the testcases.")
     req_note += (
-        "\n\nALSO add `\"explanation\"` to the same file, for teammates who do not know this code. Use short sentences and everyday "
-        "words: no function or variable names, no file paths, no jargon (explain a necessary term in brackets once). Say what a "
-        "driver, a fleet manager or a tester would notice. Shape: `{\"plain\": {\"problem\": \"what was wrong and who noticed it\", "
-        "\"fix\": \"what the change does now, in everyday words\", \"how_tests_tell\": \"what you would see on a device with the "
-        "fix and what on one without it\", \"not_covered\": [\"short plain lines: what these tests do not check and why\"]}, "
-        "\"tests\": [{\"testcase\": \"<file name>\", \"what\": \"one or two plain sentences: what this test does and what a "
-        "pass means\"}]}`. Be accurate: describe only what the PRs and your testcases really do.")
+        "\n\nALSO add `\"explanation\"` to the same file. Its reader is a teammate who does not know this code and wants to "
+        "understand the change quickly. Write in VERY SIMPLE language: short sentences, everyday words, as if explaining to a "
+        "friend. No function, variable or file names, no PR numbers, no jargon (if a technical word is unavoidable, explain it in "
+        "brackets once). Say what a driver, a fleet manager or a tester would notice. Shape: `{\"plain\": {"
+        "\"problem\": \"what was going wrong, when it happened, and who noticed it (2-4 sentences)\", "
+        "\"changes\": [\"one simple sentence per thing that was changed, e.g. 'The camera now waits at most 5 seconds instead of "
+        "waiting forever.'\" ...], "
+        "\"fix\": \"the result in one short paragraph: how the device behaves now\", "
+        "\"how_tests_tell\": \"how you can tell a fixed device from an unfixed one: what you would see on each\", "
+        "\"not_covered\": [\"short plain lines: what is not checked and why\"]}}`. Cover EVERY change in the linked PRs that "
+        "matters to behaviour (skip pure clean-ups, but say if the PR is mostly clean-up). Be accurate: describe only what the "
+        "code really does, never guess.")
     if stage == "generate":
         return head + common + req_note + pr_note
     if stage == "regenerate":

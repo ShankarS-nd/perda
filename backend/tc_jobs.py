@@ -375,6 +375,7 @@ def clean_details(data: Any) -> dict[str, Any]:
         "analysis_at": _txt(d.get("analysis_at"), 30), "target_branch": _txt(d.get("target_branch"), 120),
         "confidence": float(conf) if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
         "plain": {"problem": _txt(plain.get("problem")), "fix": _txt(plain.get("fix")),
+                  "changes": [_txt(x, 500) for x in (plain.get("changes") if isinstance(plain.get("changes"), list) else [])[:14]],
                   "how_tests_tell": _txt(plain.get("how_tests_tell")),
                   "not_covered": [_txt(x, 400) for x in (plain.get("not_covered") if isinstance(plain.get("not_covered"), list) else [])[:12]]},
         "tests": [{"testcase": _txt(t.get("testcase"), 200), "what": _txt(t.get("what"), 700)}
