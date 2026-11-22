@@ -552,6 +552,266 @@ function TcViewer({ dt, name, onClose }: { dt: string; name: string; onClose: ()
   );
 }
 
+
+/** What the testcases of a ticket are based on, in plain words: the PRs, what they change, the testcases, how validation went. */
+interface DetailsPr { key: string; repo: string; id: string; title: string; status: string; url: string; target: string; source: string;
+  commit: string; used: boolean | null; why: string; summary: string; files: string[]; by: string }
+interface TicketDetailsData {
+  analysis_at: string; target_branch: string; confidence: number | null; updated_at: string;
+  plain: { problem: string; fix: string; how_tests_tell: string; not_covered: string[] };
+  tests: { testcase: string; what: string }[]; prs: DetailsPr[];
+  tc_tickets: { key: string; url: string; testcase: string }[]; technical: { label: string; text: string }[];
+}
+const DETAIL_TABS = [["plain", "In plain words"], ["prs", "Pull requests"], ["tests", "Testcases"], ["validation", "Validation"], ["needs", "Needs & checks"], ["tech", "Technical notes"]] as const;
+type DetailTab = (typeof DETAIL_TABS)[number][0];
+const when = (iso?: string | null) => { if (!iso) return ""; const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(); };
+
+function TicketDetails({ dt, ticket, req, prs, jobs, cells, acceptedBy, onClose, onOpenFile }: {
+  dt: string; ticket?: Ticket; req?: TcRequirements; prs?: PullRequest[] | null; jobs?: Partial<Record<Stage, TcJob>>;
+  cells: { generated: string; validated: string; included: string }; acceptedBy?: string;
+  onClose: () => void; onOpenFile: (name: string) => void;
+}) {
+  const [data, setData] = useState<TicketDetailsData | null>(null);
+  const [err, setErr] = useState("");
+  const [tab, setTab] = useState<DetailTab>("plain");
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/tc-details/${encodeURIComponent(dt)}`);
+        const body = await res.json().catch(() => ({}));
+        if (stop) return;
+        if (!res.ok) setErr(body.detail || `Could not load the details (${res.status}).`);
+        else setData(body);
+      } catch { if (!stop) setErr("Could not reach the backend."); }
+    })();
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => { stop = true; window.removeEventListener("keydown", esc); };
+  }, [dt, onClose]);
+
+  const alerts = prAlerts(req, prs);
+  const liveByKey = new Map((prs ?? []).map((p) => [`${p.repo}${p.id}`, p]));
+  const hasPlain = !!(data?.plain.problem || data?.plain.fix || data?.plain.how_tests_tell);
+  const Block = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <section className="mb-4"><h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{title}</h4>{children}</section>
+  );
+  const Text = ({ children }: { children: React.ReactNode }) => <p className="text-[13.5px] leading-relaxed text-gray-200">{children}</p>;
+  const Empty = ({ children }: { children: React.ReactNode }) => <p className="text-[12.5px] text-gray-500">{children}</p>;
+  const stages: Stage[] = ["generate", "regenerate", "validate", "include", "remove"];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div role="dialog" aria-modal="true" aria-label={`Details of ${dt}`} className="ds-card flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden">
+        <div className="ds-card-header flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-gray-100">
+              <a href={`${JIRA_BASE}/browse/${dt}`} target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">{dt}</a>
+              {ticket && <span className="ml-2 font-normal text-gray-300">{ticket.summary}</span>}
+            </h3>
+            <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-gray-500">
+              {ticket && <span>{ticket.issue_type} · {ticket.status}{ticket.assignee ? ` · ${ticket.assignee}` : ""}</span>}
+              <span>Generated TCs: <b className="text-gray-300">{cells.generated || "—"}</b></span>
+              <span>Validated: <b className="text-gray-300">{cells.validated || "—"}</b></span>
+              {cells.included && <span>Included in: <b className="text-gray-300">{cells.included}</b></span>}
+              {data?.analysis_at && <span>Analysed {when(data.analysis_at)}</span>}
+              {data?.target_branch && <span>Branch <span className="font-mono">{data.target_branch}</span></span>}
+              {data?.confidence != null && <span>Claude's confidence {Math.round(data.confidence * 100)}%</span>}
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-lg px-2.5 py-1 text-[13px] text-gray-400 hover:bg-white/[0.06]">✕</button>
+        </div>
+        <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-white/[0.08] px-3 pt-2">
+          {DETAIL_TABS.map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
+              className={`whitespace-nowrap rounded-t-lg px-3 py-1.5 text-[12.5px] transition-colors ${tab === id ? "bg-white/[0.07] font-medium text-gray-100" : "text-gray-400 hover:text-gray-200"}`}>
+              {label}{id === "prs" && alerts.lines.length > 0 && <span className="ml-1.5 rounded-full bg-amber-500/25 px-1.5 text-[10px] text-amber-200">{alerts.lines.length}</span>}
+            </button>
+          ))}
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {err && tab !== "validation" && tab !== "needs" ? <p className="text-[12.5px] text-amber-300">{err}</p> : null}
+          {!data && !err && tab !== "validation" && tab !== "needs" && <p className="text-[12.5px] text-gray-500">Loading…</p>}
+
+          {tab === "plain" && data && (
+            <>
+              {alerts.lines.length > 0 && (
+                <div className="mb-4 rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 ring-1 ring-inset ring-amber-500/25">
+                  <p className="font-medium">These testcases may be out of date</p>
+                  <ul className="mt-0.5 list-disc pl-4">{alerts.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+                </div>
+              )}
+              {hasPlain ? (
+                <>
+                  <Block title="What was wrong">{data.plain.problem ? <Text>{data.plain.problem}</Text> : <Empty>Not written.</Empty>}</Block>
+                  <Block title="What the change does">{data.plain.fix ? <Text>{data.plain.fix}</Text> : <Empty>Not written.</Empty>}</Block>
+                  <Block title="How the tests tell a fixed device from an unfixed one">{data.plain.how_tests_tell ? <Text>{data.plain.how_tests_tell}</Text> : <Empty>Not written.</Empty>}</Block>
+                  <Block title="What the tests do not cover">
+                    {data.plain.not_covered.length ? <ul className="list-disc space-y-1 pl-5 text-[13px] text-gray-300">{data.plain.not_covered.map((x, i) => <li key={i}>{x}</li>)}</ul> : <Empty>Nothing listed.</Empty>}
+                  </Block>
+                </>
+              ) : (
+                <div className="rounded-lg bg-sky-500/10 px-3 py-2 text-[12.5px] text-sky-100 ring-1 ring-inset ring-sky-500/25">
+                  No plain-language explanation has been written for this ticket yet. Run <b>Regenerate after merge</b> and Claude writes one.
+                  Until then the technical notes are under the last tab{data.technical.length ? "" : ", but there are none for this ticket either"}.
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === "prs" && data && (
+            <>
+              {alerts.lines.length > 0 && (
+                <div className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100 ring-1 ring-inset ring-amber-500/25">
+                  <p className="font-medium">Changed since these testcases were generated</p>
+                  <ul className="mt-0.5 list-disc pl-4">{alerts.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+                </div>
+              )}
+              {data.prs.length === 0 && !(prs && prs.length) && <Empty>No pull requests are linked to this ticket.</Empty>}
+              <div className="space-y-2.5">
+                {data.prs.map((p) => {
+                  const live = liveByKey.get(p.key);
+                  return (
+                    <article key={p.key} className="rounded-lg bg-white/[0.03] p-3 ring-1 ring-inset ring-white/[0.08]">
+                      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                        <Pill className={PR_STYLE[live?.status ?? p.status] ?? "bg-white/[0.05] text-gray-300 ring-white/[0.08]"}>{PR_LABEL[live?.status ?? p.status] ?? (live?.status ?? p.status)}</Pill>
+                        <a href={p.url || live?.url} target="_blank" rel="noreferrer" className="font-medium text-indigo-300 hover:underline">{p.repo}{p.id}</a>
+                        <PrUsed cov={{ used: p.used, why: p.why, by: p.by }} status={live?.status ?? p.status} />
+                        {live && live.status !== p.status && <span className="text-[11px] text-amber-300">was {(PR_LABEL[p.status] ?? p.status).toLowerCase()} when the testcases were generated</span>}
+                      </div>
+                      <p className="mt-1 text-[12.5px] text-gray-300">{p.title}</p>
+                      {p.summary ? <p className="mt-1.5 text-[13px] leading-relaxed text-gray-200"><span className="text-gray-500">What it changes: </span>{p.summary}</p>
+                        : <p className="mt-1.5 text-[12px] text-gray-500">No plain-language summary for this PR yet (Regenerate after merge writes one).</p>}
+                      {p.why && <p className="mt-1 text-[12px] text-gray-400"><span className="text-gray-500">{p.used ? "Used because: " : "Not used because: "}</span>{p.why}</p>}
+                      <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11.5px] text-gray-500">
+                        {p.source && <span>{p.source}{p.target ? ` → ${p.target}` : ""}</span>}
+                        {!p.source && p.target && <span>into {p.target}</span>}
+                        {p.commit && <span>commit read: <span className="font-mono">{p.commit}</span></span>}
+                      </p>
+                      {p.files.length > 0 && <p className="mt-1 break-all font-mono text-[11px] text-gray-500">{p.files.join(" · ")}</p>}
+                    </article>
+                  );
+                })}
+                {(prs ?? []).filter((l) => !data.prs.some((p) => p.key === `${l.repo}${l.id}`)).map((l) => (
+                  <article key={`${l.repo}${l.id}`} className="rounded-lg bg-amber-500/[0.06] p-3 ring-1 ring-inset ring-amber-400/25">
+                    <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                      <Pill className={PR_STYLE[l.status] ?? "bg-white/[0.05] text-gray-300 ring-white/[0.08]"}>{PR_LABEL[l.status] ?? l.status}</Pill>
+                      <a href={l.url} target="_blank" rel="noreferrer" className="font-medium text-indigo-300 hover:underline">{l.repo}{l.id}</a>
+                      <span className="text-[11px] text-amber-300">linked after these testcases were generated</span>
+                    </div>
+                    <p className="mt-1 text-[12.5px] text-gray-300">{l.title}</p>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
+
+          {tab === "tests" && (
+            <div className="space-y-2.5">
+              {(req?.testcases ?? []).length === 0 && <Empty>No testcases yet.</Empty>}
+              {(req?.testcases ?? []).map((f) => {
+                const v = req?.validation?.[f], st = VSTATUS[v?.status ?? "not_run"] ?? VSTATUS.not_run, h = halves(v);
+                const id = tcId(f), jira = data?.tc_tickets.find((t) => t.testcase === f || `${t.key}`.replace("-", "_") === id);
+                const what = data?.tests.find((t) => t.testcase === f || tcId(t.testcase) === id)?.what;
+                return (
+                  <article key={f} className="rounded-lg bg-white/[0.03] p-3 ring-1 ring-inset ring-white/[0.08]">
+                    <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                      <button onClick={() => onOpenFile(f)} className="font-mono font-medium text-indigo-300 hover:underline" title="Open the testcase file">{id}</button>
+                      <span className={`rounded-md px-1.5 py-0.5 text-[11px] ring-1 ring-inset ${st.chip.split(" hover:")[0]}`}>{st.mark} {st.label}</span>
+                      <span className="text-[11.5px]"><span className={halfCls(h.post, h.failed)}>post-fix {halfMark(h.post, h.failed)}</span> <span className="opacity-40">·</span> <span className={halfCls(h.pre)}>pre-fix {halfMark(h.pre)}</span></span>
+                      {(jira || /^TC_\d+$/.test(id)) && (
+                        <a href={jira?.url || `${JIRA_BASE}/browse/${id.replace("_", "-")}`} target="_blank" rel="noreferrer" className="text-[11.5px] text-indigo-300 hover:underline">{jira?.key ?? id.replace("_", "-")} in Jira</a>
+                      )}
+                    </div>
+                    <p className="mt-1 break-all font-mono text-[11px] text-gray-500">{f}</p>
+                    {what ? <p className="mt-1.5 text-[13px] leading-relaxed text-gray-200"><span className="text-gray-500">What it does: </span>{what}</p>
+                      : <p className="mt-1.5 text-[12px] text-gray-500">No plain-language description for this testcase yet (Regenerate after merge writes one).</p>}
+                    <p className="mt-1.5 text-[11.5px] text-gray-500">
+                      {v?.fixed_device ? `Passed with the fix on ${v.fixed_device}.` : "Not yet run on a device with the fix."}{" "}
+                      {v?.unfixed_device ? `Failed as it should without the fix on ${v.unfixed_device}.` : "Not yet shown to fail without the fix."}
+                    </p>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          {tab === "validation" && (
+            <div className="space-y-2.5">
+              {stages.filter((k) => jobs?.[k]).length === 0 && <Empty>No job has run for this ticket on the dashboard yet.</Empty>}
+              {stages.filter((k) => jobs?.[k]).map((k) => {
+                const j = jobs![k]!, t = jobTime(j, Date.now()), pr = j.params;
+                return (
+                  <article key={k} className="rounded-lg bg-white/[0.03] p-3 ring-1 ring-inset ring-white/[0.08]">
+                    <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                      <span className="font-medium text-gray-100">{STAGE_LABEL[k]}</span>
+                      <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-gray-300">{j.status}{j.result.outcome ? ` · ${j.result.outcome}` : ""}</span>
+                      <span className="text-[11.5px] text-gray-500">{[j.actor, when(j.finished_at ?? j.created_at), t.text].filter(Boolean).join(" · ")}</span>
+                    </div>
+                    {(pr.device_id || pr.unfixed_device_id || pr.branch) && (
+                      <p className="mt-1 text-[11.5px] text-gray-500">
+                        {pr.device_id && <>Device with the fix: <span className="font-mono">{pr.device_id}</span>{"  "}</>}
+                        {pr.unfixed_device_id && <>Device without the fix: <span className="font-mono">{pr.unfixed_device_id}</span>{"  "}</>}
+                        {pr.branch && <>Branch: <span className="font-mono">{pr.branch}</span></>}
+                      </p>
+                    )}
+                    {(j.result.summary || j.message) && <p className="mt-1.5 text-[13px] leading-relaxed text-gray-200">{j.result.summary || j.message}</p>}
+                    {j.result.reason && <p className="mt-1 text-[12px] text-gray-400"><span className="text-gray-500">Why: </span>{j.result.reason}</p>}
+                    {!!j.result.corrections?.length && (
+                      <ul className="mt-1 list-disc pl-5 text-[12px] text-gray-400">{j.result.corrections.map((c, i) => <li key={i}><span className="font-mono">{tcId(c.testcase)}</span>: {c.what}</li>)}</ul>
+                    )}
+                    {k === "validate" && !!j.result.remaining?.length && (
+                      <div className="mt-1.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-300/80">Still open{acceptedBy ? ` (accepted by ${acceptedBy})` : ""}</p>
+                        <ul className="list-disc space-y-0.5 pl-5 text-[12px] text-gray-300">{j.result.remaining.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          {tab === "needs" && (
+            <>
+              <Block title="Platform">
+                <Text>{req?.runs_on.length ? <>Runs on <span className="font-mono">{req.runs_on.join(", ")}</span></> : "Not recorded."}{!!req?.na_on.length && <>; reports NA on <span className="font-mono">{req.na_on.join(", ")}</span></>}</Text>
+              </Block>
+              <Block title="Device with the fix">{req?.fixed_build ? <Text>{req.fixed_build}</Text> : <Empty>Not recorded.</Empty>}</Block>
+              <Block title="Device without the fix">{req?.unfixed_build ? <Text>{req.unfixed_build}</Text> : <Empty>Not recorded.</Empty>}</Block>
+              <Block title="What the device needs">
+                {req?.needs.length ? <ul className="list-disc space-y-1 pl-5 text-[13px] text-gray-300">{req.needs.map((n, i) => <li key={i}>{n}</li>)}</ul> : <Empty>Nothing recorded.</Empty>}
+              </Block>
+              <Block title="Checked on each device before a run">
+                {req?.device_checks?.length ? (
+                  <ul className="list-disc space-y-1 pl-5 text-[13px] text-gray-300">
+                    {req.device_checks.map((c, i) => <li key={i}>{c.what} <span className="text-gray-500">(with fix: {c.fixed}, without: {c.unfixed})</span></li>)}
+                  </ul>
+                ) : <Empty>No automatic checks recorded.</Empty>}
+              </Block>
+              {!!req?.notes.length && (
+                <Block title="Notes"><ul className="list-disc space-y-1 pl-5 text-[13px] text-gray-300">{req.notes.map((n, i) => <li key={i}>{n}</li>)}</ul></Block>
+              )}
+            </>
+          )}
+
+          {tab === "tech" && data && (
+            data.technical.length === 0 ? <Empty>No technical notes were saved for this ticket.</Empty> : (
+              <div className="space-y-3">
+                <p className="text-[12px] text-gray-500">Claude's own working notes. They are written for engineers and may name functions and files.</p>
+                {data.technical.map((t, i) => (
+                  <section key={i}><h4 className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{t.label}</h4>
+                    <p className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-gray-300">{t.text}</p></section>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const INPUT = "w-full rounded-lg border border-white/[0.1] bg-black/20 px-3 py-2 text-[13px] text-gray-100 outline-none placeholder:text-gray-600 focus:border-indigo-400/60";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -1178,6 +1438,7 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
   const [accepted, setAccepted] = useState<Record<string, string>>({});
   const [panel, setPanel] = useState<Panel | null>(null);
   const [viewTc, setViewTc] = useState<{ dt: string; name: string } | null>(null);
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const hadActive = useRef(false);
 
   // ---- loading ------------------------------------------------------------
@@ -1827,6 +2088,10 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                                     })}
                                   </span>
                                 )}
+                                {field(t.key, "generated_tcs") === "Yes" && !!reqs[t.key]?.testcases.length && (
+                                  <button onClick={() => setDetailsFor(t.key)} title="PRs, what changed in plain words, testcases, validation"
+                                    className="rounded-md px-1.5 py-0.5 text-[11px] text-indigo-300 ring-1 ring-inset ring-indigo-400/30 transition-colors hover:bg-indigo-500/15">ⓘ Details</button>
+                                )}
                                 {field(t.key, "generated_tcs") === "Yes" && (() => {
                                   const al = prAlerts(reqs[t.key], prMap[t.key]);
                                   const regen = runAction(t.key, "regenerate", "Regenerate after merge");
@@ -1944,6 +2209,12 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
       )}
 
       {viewTc && <TcViewer dt={viewTc.dt} name={viewTc.name} onClose={() => setViewTc(null)} />}
+      {detailsFor && (
+        <TicketDetails dt={detailsFor} ticket={tickets?.find((x) => x.key === detailsFor)} req={reqs[detailsFor]} prs={prMap[detailsFor]} jobs={jobs[detailsFor]}
+          cells={{ generated: field(detailsFor, "generated_tcs"), validated: field(detailsFor, "validated"), included: field(detailsFor, "included_in_runs") }}
+          acceptedBy={jobs[detailsFor]?.validate ? accepted[jobs[detailsFor]!.validate!.id] : undefined}
+          onClose={() => setDetailsFor(null)} onOpenFile={(name) => setViewTc({ dt: detailsFor, name })} />
+      )}
 
       {panel && (
         <JobPanel

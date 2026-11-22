@@ -8,6 +8,22 @@ and the corrections made along the way. Newest session first. Keep entries short
 
 ---
 
+## 2026-11-22 — Details tab per ticket; PR badges; moved jobs to the server (live on dta_server)
+- **Live setup:** backend/frontend on `dta_server` (`~/perda`, systemd `perda-backend`/`perda-frontend`), the worker runs there too as a
+  user service `perda-tc-worker` (project `~/TA_Utility`, token from the server `.env`, linger on). Data merged from the tested copy.
+  Deploys so far: copy files with rsync, restart worker (only when no job runs), user restarts backend + rebuilds frontend.
+- **Device pre-checks** (read-only login before a validate): `fix_checks` written by Claude; bugs fixed: preflight parsed detect_device
+  output wrongly (silently skipped), `grep -rc` on a folder matches digits in paths (checks must print one line), a device-blamed
+  failure is inconclusive not failed, `unfixed_conclusive` flag, both halves on record lift a half-run partial to Yes.
+- **PR awareness:** `pr_snapshot` (status of each PR at generation) -> badge "changed since generated"; `pr_coverage` (Claude: which PRs
+  the testcases use, and why) -> "in TCs / not in TCs" badge per PR; open-PR head commits recorded at Generate/Regenerate and checked by a
+  background thread (a first version ran in the job loop and froze the worker ~70 s after each job).
+- **Details tab (this entry):** "ⓘ Details" under a ticket's testcases opens tabs: In plain words / Pull requests / Testcases / Validation /
+  Needs & checks / Technical notes. Data: new table `tc_details`, `POST /tc-worker/details` (worker, sent only when changed),
+  `GET /tc-details/{dt}` (loaded on open, kept out of the polled `/tc-jobs`). Claude now writes `explanation` (plain problem / fix /
+  how the tests tell / not covered, one plain line per testcase) and a plain `summary` + `files` per PR in `pr_coverage`.
+  Old tickets show PRs, Jira TCs and the old technical notes until they are regenerated. 158 backend tests pass.
+
 ## 2026-11-18 — Verified Include/Remove on GitHub; custom name for a new branch
 - Real Include into an existing branch and Remove were run once on a throwaway branch of nd_test_bot (both
   branches deleted afterwards). First attempt failed safely: base was `master`, which has no BAGHEERA folder.

@@ -799,6 +799,11 @@ class TcWorkerRequirements(BaseModel):
     items: dict[str, Any] = {}
 
 
+class TcWorkerDetails(BaseModel):
+    worker: str = ""
+    items: dict[str, Any] = {}
+
+
 class TcWorkerFiles(BaseModel):
     worker: str = ""
     dt: str
@@ -870,6 +875,20 @@ def tc_worker_files(payload: TcWorkerFiles, x_worker_token: str | None = Header(
     import tc_jobs
     _tc(tc_jobs.check_token, x_worker_token)
     return {"need": _tc(tc_jobs.sync_files, payload.dt, payload.shas, payload.files)}
+
+
+@app.post("/tc-worker/details")
+def tc_worker_details(payload: TcWorkerDetails, x_worker_token: str | None = Header(None)):
+    """What each ticket's testcases are based on (PRs, plain-language explanation), sent by the worker."""
+    import tc_jobs
+    _tc(tc_jobs.check_token, x_worker_token)
+    return {"stored": _tc(tc_jobs.set_details, payload.items)}
+
+
+@app.get("/tc-details/{dt}")
+def tc_details_get(dt: str):
+    import tc_jobs
+    return _tc(tc_jobs.get_details, dt)
 
 
 @app.get("/tc-files/{dt}/{name}")

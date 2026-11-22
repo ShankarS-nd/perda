@@ -242,6 +242,12 @@ def init_db() -> None:
                 PRIMARY KEY (dt, name)
             );
 
+            CREATE TABLE IF NOT EXISTS tc_details (
+                dt         TEXT PRIMARY KEY,
+                data_json  TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS tc_requirements (
                 dt         TEXT PRIMARY KEY,
                 data_json  TEXT NOT NULL,

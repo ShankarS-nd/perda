@@ -518,7 +518,10 @@ def pr_coverage(root: Path, dt: str) -> dict[str, dict[str, Any]]:
     for e in raw[:40] if isinstance(raw, list) else []:
         m = PR_REF.search(str(e.get("pr") or "")) if isinstance(e, dict) else None
         if m and isinstance(e.get("used"), bool):
-            out[f"{m.group(1)}#{m.group(2)}"] = {"used": e["used"], "why": " ".join(str(e.get("why") or "").split())[:200], "by": "claude"}
+            files = e.get("files") if isinstance(e.get("files"), list) else []
+            out[f"{m.group(1)}#{m.group(2)}"] = {"used": e["used"], "why": " ".join(str(e.get("why") or "").split())[:200], "by": "claude",
+                                                  "summary": " ".join(str(e.get("summary") or "").split())[:800],
+                                                  "files": [str(f)[:160] for f in files[:8]]}
     try:
         bundle = json.loads((root / "out" / dt / "research_bundle.json").read_text()).get("dev_status_prs") or []
     except (OSError, ValueError, AttributeError):
@@ -648,6 +651,92 @@ def publish_requirements(api: "Api", root: Path, watcher: "HeadWatcher | None" =
             api.post("/tc-worker/requirements", {"items": items})
         except (urllib.error.URLError, OSError):
             pass
+
+
+TECH_KEYS = (("what_broke", "What broke"), ("root_cause", "Root cause"), ("fix", "The fix"), ("fix_description", "The fix"),
+             ("fix_prs", "Fix PRs"), ("before_after", "Before and after"), ("oracle", "What the tests look for"),
+             ("not_covered_and_why", "Not covered, and why"), ("risks", "Risks"), ("duplicate_check", "Duplicate check"))
+
+
+def _flat(v: Any, depth: int = 0) -> str:
+    if isinstance(v, dict) and depth < 4:
+        return "; ".join(f"{k}: {_flat(x, depth + 1)}" for k, x in v.items())
+    if isinstance(v, list) and depth < 4:
+        return " | ".join(_flat(x, depth + 1) for x in v)
+    return str(v)
+
+
+def ticket_details(root: Path, dt: str) -> dict[str, Any]:
+    """Everything the page's Details tab shows about a ticket's testcases that is not in the requirements:
+    the plain-language explanation Claude wrote, each linked PR (what it changes, whether it was used), the Jira
+    TC subtasks, and the older free-form technical notes as a fallback."""
+    out_dir = root / "out" / dt
+    try:
+        a = json.loads((out_dir / "bug_analysis.json").read_text())
+        at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime((out_dir / "bug_analysis.json").stat().st_mtime))
+    except (OSError, ValueError):
+        a, at = {}, ""
+    a = a if isinstance(a, dict) else {}
+    try:
+        bundle = json.loads((out_dir / "research_bundle.json").read_text())
+    except (OSError, ValueError):
+        bundle = {}
+    bundle = bundle if isinstance(bundle, dict) else {}
+    ex = a.get("explanation") if isinstance(a.get("explanation"), dict) else {}
+    plain = ex.get("plain") if isinstance(ex.get("plain"), dict) else {}
+    cov = pr_coverage(root, dt)
+    prs = []
+    for p in (bundle.get("dev_status_prs") or [])[:40]:
+        if not (isinstance(p, dict) and p.get("id")):
+            continue
+        repo = str(p.get("repository") or "").split("/")[-1]
+        key = f"{repo}{p['id']}"
+        m = re.match(r"\s*commit\s+([0-9a-f]{7,40})", str(p.get("diff") or ""))
+        c = cov.get(key, {})
+        prs.append({"key": key, "repo": repo, "id": p["id"], "title": p.get("name") or "", "status": str(p.get("status") or ""),
+                    "url": p.get("url") or "", "target": p.get("destination_branch") or "", "source": p.get("source_branch") or "",
+                    "commit": m.group(1)[:10] if m else "", "used": c.get("used"), "why": c.get("why") or "",
+                    "summary": c.get("summary") or "", "files": c.get("files") or [], "by": c.get("by") or "bundle"})
+    tests = [{"testcase": str(t.get("testcase")), "what": str(t.get("what") or "")}
+             for t in (ex.get("tests") if isinstance(ex.get("tests"), list) else []) if isinstance(t, dict) and t.get("testcase")]
+    subs = a.get("jira_tc_subtasks") if isinstance(a.get("jira_tc_subtasks"), list) else []
+    conf = a.get("confidence")
+    if isinstance(conf, dict):
+        conf = conf.get("score")
+    return {
+        "analysis_at": at, "target_branch": str(bundle.get("target_branch") or a.get("branch") or ""),
+        "confidence": conf if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
+        "plain": {"problem": plain.get("problem") or "", "fix": plain.get("fix") or "",
+                  "how_tests_tell": plain.get("how_tests_tell") or "",
+                  "not_covered": [str(x) for x in plain.get("not_covered", [])] if isinstance(plain.get("not_covered"), list) else []},
+        "tests": tests, "prs": prs,
+        "tc_tickets": [{"key": t.get("key"), "url": t.get("url") or "", "testcase": t.get("testcase_file") or ""}
+                       for t in subs if isinstance(t, dict) and t.get("key")],
+        "technical": [{"label": label, "text": _flat(a[k])} for k, label in TECH_KEYS if a.get(k)],
+    }
+
+
+_details_sent: dict[str, str] = {}
+
+
+def publish_details(api: "Api", root: Path) -> None:
+    """Send each ticket's details to the backend when they changed since the last time (kept out of the polled data)."""
+    batch: dict[str, Any] = {}
+    for d in sorted((root / "out").glob("*-*")):
+        if DT_RE.fullmatch(d.name) and (d / "bug_analysis.json").is_file() and any(d.glob("TC_*.py")):
+            data = ticket_details(root, d.name)
+            digest = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
+            if _details_sent.get(d.name) != digest:
+                batch[d.name] = (data, digest)
+    items = list(batch.items())
+    for n in range(0, len(items), 8):
+        chunk = items[n:n + 8]
+        try:
+            api.post("/tc-worker/details", {"items": {k: v[0] for k, v in chunk}})
+        except (urllib.error.URLError, OSError):
+            return
+        for k, v in chunk:
+            _details_sent[k] = v[1]
 
 
 LITERAL_SECRET = re.compile(r"""(?i)((?:password|passwd|pwd|token|secret)\w*\s*[:=]\s*)(['"])[^'"\n]{3,}\2""")
@@ -1029,7 +1118,16 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "ticket (open, merged, declined, other branches, reverts): `{\"pr\": \"<repo>#<number>\", \"used\": true|false, "
         "\"why\": \"short reason\"}`. `used` is true only when you read that PR's diff and the testcases cover its change. "
         "False when you could not read it, it is still open and unreadable, declined, a revert, for another branch, or "
-        "unrelated to this behaviour; say which in `why`. The dashboard shows each PR as in or not in the testcases.")
+        "unrelated to this behaviour; say which in `why`. The dashboard shows each PR as in or not in the testcases. Also give each "
+        "entry `\"summary\"` (what that PR changes, in plain words, one to three sentences) and `\"files\"` (up to six key files it touches).")
+    req_note += (
+        "\n\nALSO add `\"explanation\"` to the same file, for teammates who do not know this code. Use short sentences and everyday "
+        "words: no function or variable names, no file paths, no jargon (explain a necessary term in brackets once). Say what a "
+        "driver, a fleet manager or a tester would notice. Shape: `{\"plain\": {\"problem\": \"what was wrong and who noticed it\", "
+        "\"fix\": \"what the change does now, in everyday words\", \"how_tests_tell\": \"what you would see on a device with the "
+        "fix and what on one without it\", \"not_covered\": [\"short plain lines: what these tests do not check and why\"]}, "
+        "\"tests\": [{\"testcase\": \"<file name>\", \"what\": \"one or two plain sentences: what this test does and what a "
+        "pass means\"}]}`. Be accurate: describe only what the PRs and your testcases really do.")
     if stage == "generate":
         return head + common + req_note + pr_note
     if stage == "regenerate":
@@ -1718,6 +1816,7 @@ def main() -> int:
                 except Exception:
                     pass
             publish_requirements(api, args.project_root, watcher)
+            publish_details(api, args.project_root)
             publish_files(api, args.project_root)
             last_publish = time.time()
             if args.once:
@@ -1725,6 +1824,7 @@ def main() -> int:
         else:
             if time.time() - last_publish > 300:     # first idle pass, then every 5 minutes
                 publish_requirements(api, args.project_root, watcher)
+                publish_details(api, args.project_root)
                 publish_files(api, args.project_root)
                 last_publish = time.time()
             time.sleep(POLL_SEC)

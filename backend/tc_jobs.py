@@ -339,6 +339,89 @@ def get_file(dt: str, name: str) -> dict[str, Any]:
     return dict(row)
 
 
+# ---------------------------------------------------------------------------
+# Ticket details: what the testcases are based on, in plain words (loaded when a ticket is opened)
+# ---------------------------------------------------------------------------
+
+def _txt(value: Any, n: int = 1500) -> str:
+    return " ".join(str(value or "").split())[:n]
+
+
+def clean_details(data: Any) -> dict[str, Any]:
+    """Short plain strings in known places only: this comes from files on a workstation."""
+    d = data if isinstance(data, dict) else {}
+    plain = d.get("plain") if isinstance(d.get("plain"), dict) else {}
+    conf = d.get("confidence")
+    prs = []
+    for p in (d.get("prs") if isinstance(d.get("prs"), list) else [])[:40]:
+        if isinstance(p, dict) and p.get("id"):
+            url = _txt(p.get("url"), 300)
+            prs.append({
+                "key": _txt(p.get("key"), 120), "repo": _txt(p.get("repo"), 80), "id": _txt(p.get("id"), 20),
+                "title": _txt(p.get("title"), 300), "status": _txt(p.get("status"), 12).upper(),
+                "url": url if url.startswith("https://") else "", "target": _txt(p.get("target"), 120),
+                "source": _txt(p.get("source"), 120), "commit": _txt(p.get("commit"), 12),
+                "used": p.get("used") if isinstance(p.get("used"), bool) else None,
+                "why": _txt(p.get("why"), 400), "summary": _txt(p.get("summary"), 800),
+                "files": [_txt(f, 160) for f in (p.get("files") if isinstance(p.get("files"), list) else [])[:8]],
+                "by": p.get("by") if p.get("by") in ("claude", "bundle") else "bundle"})
+    tickets = []
+    for t in (d.get("tc_tickets") if isinstance(d.get("tc_tickets"), list) else [])[:40]:
+        if isinstance(t, dict) and re.fullmatch(r"[A-Z][A-Z0-9]*-\d+", str(t.get("key") or "")):
+            url = _txt(t.get("url"), 300)
+            tickets.append({"key": t["key"], "url": url if url.startswith("https://") else "",
+                            "testcase": _txt(t.get("testcase"), 200)})
+    return {
+        "analysis_at": _txt(d.get("analysis_at"), 30), "target_branch": _txt(d.get("target_branch"), 120),
+        "confidence": float(conf) if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
+        "plain": {"problem": _txt(plain.get("problem")), "fix": _txt(plain.get("fix")),
+                  "how_tests_tell": _txt(plain.get("how_tests_tell")),
+                  "not_covered": [_txt(x, 400) for x in (plain.get("not_covered") if isinstance(plain.get("not_covered"), list) else [])[:12]]},
+        "tests": [{"testcase": _txt(t.get("testcase"), 200), "what": _txt(t.get("what"), 700)}
+                  for t in (d.get("tests") if isinstance(d.get("tests"), list) else [])[:40] if isinstance(t, dict) and t.get("testcase")],
+        "prs": prs, "tc_tickets": tickets,
+        "technical": [{"label": _txt(t.get("label"), 60), "text": _txt(t.get("text"), 2500)}
+                      for t in (d.get("technical") if isinstance(d.get("technical"), list) else [])[:14] if isinstance(t, dict) and t.get("text")],
+    }
+
+
+def set_details(items: dict[str, Any]) -> int:
+    if not isinstance(items, dict):
+        raise JobError("items must be an object.")
+    conn = db._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        n = 0
+        for dt, data in list(items.items())[:500]:
+            if DT_RE.fullmatch(str(dt)):
+                conn.execute(
+                    """INSERT INTO tc_details (dt, data_json, updated_at) VALUES (?, ?, ?)
+                       ON CONFLICT(dt) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at""",
+                    (dt, json.dumps(clean_details(data)), _now()))
+                n += 1
+        conn.commit()
+        return n
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_details(dt: str) -> dict[str, Any]:
+    dt = dt.strip().upper()
+    if not DT_RE.fullmatch(dt):
+        raise JobError("Not a ticket key.")
+    conn = db._connect()
+    try:
+        row = conn.execute("SELECT data_json, updated_at FROM tc_details WHERE dt = ?", (dt,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise JobError("The worker has not sent the details of this ticket yet. It does so every few minutes.", 404)
+    return {**json.loads(row["data_json"]), "updated_at": row["updated_at"]}
+
+
 REQ_LISTS = ("runs_on", "na_on", "needs", "notes", "testcases")
 
 
