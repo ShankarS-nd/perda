@@ -1283,7 +1283,8 @@ def _details_fixture(tmp_path):
         "what_broke": "old technical text", "before_after": {"before": "a", "after": "b"}, "confidence": {"score": 0.7},
         "jira_tc_subtasks": [{"key": "TC-9", "url": "https://x.atlassian.net/browse/TC-9", "testcase_file": "TC_1_A.py"}, {"key": "bad key"}],
         "pr_coverage": [{"pr": "repo_a#9", "used": True, "why": "read it", "summary": "Stops the crash when X happens.", "files": ["a/b.cpp"]}],
-        "explanation": {"plain": {"problem": "The camera sometimes froze.", "fix": "It now waits 5 seconds and moves on.",
+        "explanation": {"plain": {"idea": "Like a door that now closes by itself.", "devices": "Krait only.",
+                                  "problem": "The camera sometimes froze.", "fix": "It now waits 5 seconds and moves on.",
                                   "changes": ["The camera now waits at most 5 seconds."],
                                   "how_tests_tell": "Fixed: recovers. Unfixed: stays frozen.", "not_covered": ["Rare hardware fault"]},
                         "tests": [{"testcase": "TC_1_A.py", "what": "Freezes the camera, checks it recovers."}]}}))
@@ -1294,6 +1295,7 @@ def test_ticket_details_combine_the_explanation_prs_and_jira_tickets(tmp_path):
     det = tw.ticket_details(_details_fixture(tmp_path), "DT-3")
     assert det["plain"]["problem"] == "The camera sometimes froze." and det["target_branch"] == "6.16_qa" and det["confidence"] == 0.7
     assert det["plain"]["changes"] == ["The camera now waits at most 5 seconds."]
+    assert det["plain"]["idea"] == "Like a door that now closes by itself." and det["plain"]["devices"] == "Krait only."
     pr = {p["key"]: p for p in det["prs"]}
     assert pr["repo_a#9"]["summary"] == "Stops the crash when X happens." and pr["repo_a#9"]["used"] is True and pr["repo_a#9"]["commit"] == "abcdef1234"
     assert pr["repo_a#9"]["files"] == ["a/b.cpp"] and pr["repo_b#10"]["used"] is None            # not listed by Claude: unknown
@@ -1301,7 +1303,8 @@ def test_ticket_details_combine_the_explanation_prs_and_jira_tickets(tmp_path):
     assert [t["key"] for t in det["tc_tickets"]] == ["TC-9", None] or det["tc_tickets"][0]["key"] == "TC-9"
     assert any(t["label"] == "Before and after" and "before: a" in t["text"] for t in det["technical"])
     prompt = tw.build_prompt({"dt": "DT-3", "stage": "generate", "id": "j", "params": {}}, tmp_path / "r.json")
-    assert '"explanation"' in prompt and "VERY SIMPLE language" in prompt and '"changes"' in prompt and "no PR numbers" in prompt
+    assert '"explanation"' in prompt and "STYLE RULES" in prompt and "FORBIDDEN" in prompt
+    assert '"idea"' in prompt and '"devices"' in prompt and '"changes"' in prompt and "20 words or fewer" in prompt
 
 
 def test_details_are_sanitised_stored_and_only_sent_when_changed(tmp_path, monkeypatch):
@@ -1310,6 +1313,8 @@ def test_details_are_sanitised_stored_and_only_sent_when_changed(tmp_path, monke
     assert [t["key"] for t in clean["tc_tickets"]] == ["TC-9"]                                     # "bad key" is dropped
     assert clean["prs"][1]["url"] == ""                                                           # only https links are kept
     assert tj.clean_details({"plain": {"problem": "p" * 5000}})["plain"]["problem"] == "p" * 1500
+    assert tj.clean_details({"plain": {"idea": "i" * 2000, "devices": "d" * 900}})["plain"]["idea"] == "i" * 700
+    assert tj.clean_details({"plain": {"devices": "d" * 900}})["plain"]["devices"] == "d" * 500
     assert tj.clean_details({"plain": {"changes": ["a", "b" * 900] + ["x"] * 30}})["plain"]["changes"][1] == "b" * 500
     assert len(tj.clean_details({"plain": {"changes": ["x"] * 30}})["plain"]["changes"]) == 14
     assert tj.clean_details("junk")["tests"] == [] and tj.clean_details(None)["confidence"] is None

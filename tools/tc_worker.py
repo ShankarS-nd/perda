@@ -706,7 +706,8 @@ def ticket_details(root: Path, dt: str) -> dict[str, Any]:
     return {
         "analysis_at": at, "target_branch": str(bundle.get("target_branch") or a.get("branch") or ""),
         "confidence": conf if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None,
-        "plain": {"problem": plain.get("problem") or "", "fix": plain.get("fix") or "",
+        "plain": {"idea": plain.get("idea") or "", "devices": plain.get("devices") or "",
+                  "problem": plain.get("problem") or "", "fix": plain.get("fix") or "",
                   "changes": [str(x) for x in plain.get("changes", [])] if isinstance(plain.get("changes"), list) else [],
                   "how_tests_tell": plain.get("how_tests_tell") or "",
                   "not_covered": [str(x) for x in plain.get("not_covered", [])] if isinstance(plain.get("not_covered"), list) else []},
@@ -1121,18 +1122,26 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "False when you could not read it, it is still open and unreadable, declined, a revert, for another branch, or "
         "unrelated to this behaviour; say which in `why`. The dashboard shows each PR as in or not in the testcases.")
     req_note += (
-        "\n\nALSO add `\"explanation\"` to the same file. Its reader is a teammate who does not know this code and wants to "
-        "understand the change quickly. Write in VERY SIMPLE language: short sentences, everyday words, as if explaining to a "
-        "friend. No function, variable or file names, no PR numbers, no jargon (if a technical word is unavoidable, explain it in "
-        "brackets once). Say what a driver, a fleet manager or a tester would notice. Shape: `{\"plain\": {"
-        "\"problem\": \"what was going wrong, when it happened, and who noticed it (2-4 sentences)\", "
-        "\"changes\": [\"one simple sentence per thing that was changed, e.g. 'The camera now waits at most 5 seconds instead of "
-        "waiting forever.'\" ...], "
-        "\"fix\": \"the result in one short paragraph: how the device behaves now\", "
-        "\"how_tests_tell\": \"how you can tell a fixed device from an unfixed one: what you would see on each\", "
-        "\"not_covered\": [\"short plain lines: what is not checked and why\"]}}`. Cover EVERY change in the linked PRs that "
-        "matters to behaviour (skip pure clean-ups, but say if the PR is mostly clean-up). Be accurate: describe only what the "
-        "code really does, never guess.")
+        "\n\nALSO add `\"explanation\"` to the same file. It is shown on the dashboard to people who do NOT know this code "
+        "(testers, managers) and must be understood on the first read. Write like you are explaining it to a smart friend over "
+        "coffee.\n"
+        "STYLE RULES: sentences of 20 words or fewer; everyday words only; start with a comparison from daily life when one fits "
+        "(e.g. 'Think of it like a thermostat that thinks 0 degrees is the limit'). FORBIDDEN: function, variable, file, "
+        "service or config-key names; PR or commit numbers; abbreviations and jargon (TLS, overflow, kernel, firmware, binary, "
+        "ioctl, GPIO, daemon, ...). Say instead what it is: 'the device's built-in software', 'the settings file', 'the "
+        "device's diary (log)', 'a code-quality scan'. Product names (Krait, Bagheera, Octo, DHUB) are fine. Say what a "
+        "driver, fleet manager or tester would notice. Group tiny clean-up edits into ONE bullet; never list them one by one.\n"
+        "SHAPE: `{\"plain\": {"
+        "\"idea\": \"1-3 sentences: the whole thing in the simplest terms, with an everyday comparison if it helps\", "
+        "\"problem\": \"what was going wrong, when it happened, who noticed (2-4 short sentences)\", "
+        "\"changes\": [\"one short sentence per real change, at most 8, e.g. 'The number for 4 GB is now stored correctly, so it no "
+        "longer turns into zero.'\"], "
+        "\"fix\": \"how the device behaves now, in 1-3 sentences\", "
+        "\"devices\": \"which device families are affected and which are not, in one plain sentence (say why if it is short)\", "
+        "\"how_tests_tell\": \"what you would see on a fixed device and what on an unfixed one, in 2-4 short sentences\", "
+        "\"not_covered\": [\"short plain lines: what is not checked and why (at most 6)\"]}}`. If a linked PR is still open, say "
+        "so in `idea` or `fix` in a few words. Cover every change that affects behaviour; say if the PRs are mostly clean-up. "
+        "Be accurate: describe only what the code really does, never guess.")
     if stage == "generate":
         return head + common + req_note + pr_note
     if stage == "regenerate":

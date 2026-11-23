@@ -556,7 +556,7 @@ function TcViewer({ dt, name, onClose }: { dt: string; name: string; onClose: ()
 /** The change behind a ticket's testcases, explained in simple words. */
 interface TicketDetailsData {
   analysis_at: string; target_branch: string; confidence: number | null; updated_at: string;
-  plain: { problem: string; changes: string[]; fix: string; how_tests_tell: string; not_covered: string[] };
+  plain: { idea?: string; devices?: string; problem: string; changes: string[]; fix: string; how_tests_tell: string; not_covered: string[] };
   prs: { key: string; status: string; used: boolean | null; why: string }[];
   technical: { label: string; text: string }[];
 }
@@ -587,7 +587,10 @@ function TicketDetails({ dt, ticket, req, prs, onClose, onRegenerate }: {
   const alerts = prAlerts(req, prs);
   const pl = data?.plain;
   const changes = pl?.changes ?? [], notCovered = pl?.not_covered ?? [];
-  const written = !!(pl && (pl.problem || pl.fix || changes.length || pl.how_tests_tell));
+  const written = !!(pl && (pl.idea || pl.problem || pl.fix || changes.length || pl.how_tests_tell));
+  const openPrs = (prs ?? []).filter((p) => p.status === "OPEN" || p.status === "DRAFT");
+  const devicesLine = pl?.devices || (req?.runs_on.length
+    ? `Affects ${req.runs_on.join(", ")}${req.na_on.length ? `. Not affected: ${req.na_on.join(", ")}.` : "."}` : "");
   const Block = ({ title, children }: { title: string; children: React.ReactNode }) => (
     <section className="mb-5"><h4 className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-indigo-300/80">{title}</h4>{children}</section>
   );
@@ -616,8 +619,19 @@ function TicketDetails({ dt, ticket, req, prs, onClose, onRegenerate }: {
               {onRegenerate && <button onClick={onRegenerate} className="mt-1.5 rounded-md px-2 py-0.5 text-[11.5px] text-amber-100 ring-1 ring-inset ring-amber-400/40 hover:bg-amber-500/20">Regenerate after merge</button>}
             </div>
           )}
+          {openPrs.length > 0 && (
+            <div className="mb-5 rounded-lg bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-100 ring-1 ring-inset ring-amber-500/25">
+              Part of this change is <b>not merged yet</b> ({openPrs.map((p) => `${p.repo}${p.id}`).join(", ")}). The explanation describes the code as it is now, and it can change. Regenerate after it is merged.
+            </div>
+          )}
           {data && written && pl && (
             <>
+              {pl.idea && (
+                <div className="mb-5 rounded-lg bg-indigo-500/10 px-4 py-3 ring-1 ring-inset ring-indigo-400/25">
+                  <p className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-indigo-300/90">The idea</p>
+                  <p className="text-[15px] leading-relaxed text-gray-50">{pl.idea}</p>
+                </div>
+              )}
               {pl.problem && <Block title="What was going wrong"><Text>{pl.problem}</Text></Block>}
               {changes.length > 0 && (
                 <Block title="What was changed">
@@ -625,6 +639,7 @@ function TicketDetails({ dt, ticket, req, prs, onClose, onRegenerate }: {
                 </Block>
               )}
               {pl.fix && <Block title="So now"><Text>{pl.fix}</Text></Block>}
+              {devicesLine && <Block title="Which devices"><Text>{devicesLine}</Text></Block>}
               {pl.how_tests_tell && <Block title="How you can tell it is fixed"><Text>{pl.how_tests_tell}</Text></Block>}
               {notCovered.length > 0 && (
                 <Block title="What is not checked">
