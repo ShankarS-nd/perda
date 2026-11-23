@@ -631,6 +631,11 @@ class HeadWatcher(threading.Thread):
         with self.lock:
             return list(self.result.get(dt, []))
 
+    def reset(self, dt: str) -> None:
+        """A Generate / Regenerate just took a new baseline for this ticket: forget what was flagged against the old one."""
+        with self.lock:
+            self.result[dt] = []
+
     def run(self) -> None:
         while True:
             try:
@@ -719,6 +724,7 @@ def ticket_details(root: Path, dt: str) -> dict[str, Any]:
 
 
 _details_sent: dict[str, str] = {}
+WATCHER: "HeadWatcher | None" = None      # set by main(); lets a running job reset its ticket's flagged PR commits
 
 
 def publish_details(api: "Api", root: Path) -> None:
@@ -1142,6 +1148,14 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "\"not_covered\": [\"short plain lines: what is not checked and why (at most 6)\"]}}`. If a linked PR is still open, say "
         "so in `idea` or `fix` in a few words. Cover every change that affects behaviour; say if the PRs are mostly clean-up. "
         "Be accurate: describe only what the code really does, never guess.")
+    req_note += (
+        "\n\nSCENARIOS FIRST: before writing any testcase, list the scenarios (distinct behaviours the fix changes) as "
+        "`\"scenarios\": [{\"id\": \"S1\", \"what\": ..., \"families\": [...], \"differs_by_family\": ...}]` in bug_analysis.json, "
+        "then write ONE testcase per scenario. When the same scenario applies to several platforms and only the path, "
+        "command, unit name or expected value differs, write ONE testcase that picks the right one for the platform inside "
+        "its steps (probe the device or read `device_type`); never one file per platform. Two files are justified only "
+        "when they check different behaviour. Map every testcase file to its scenario ids in `candidates`. Before you finish, "
+        "merge any two files that share a scenario and differ only by platform commands, and delete the extra file.")
     if stage == "generate":
         return head + common + req_note + pr_note
     if stage == "regenerate":
@@ -1149,6 +1163,11 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
             "for the `regenerate` stage", "(\"Regenerate after merge\") for the `regenerate` stage") + (
             "\n\nThe testcases already exist in out/" + dt + "/. Re-check them against the fix as it is now, "
             "change only what the merged code makes wrong or incomplete, and change nothing if they are still right. "
+            "Exception: if two testcase files cover the SAME scenario and differ only by platform (path, command, unit "
+            "name), and neither has a real Jira TC id yet (the file name still has a placeholder id and `jira_tc_subtasks` "
+            "has no entry for it), merge them into one file that handles the platforms inside, delete the extra file, and "
+            "report `\"outcome\": \"updated\"`. If one already has a Jira TC id, do not merge: say in `summary` that they "
+            "could be merged. "
             "Do not touch a device, any repo or Jira.")
     if stage == "validate":
         mode = validate_mode(p)
@@ -1650,6 +1669,8 @@ def run_job(api: Api, args: argparse.Namespace, job: dict[str, Any]) -> None:
     if stage in ("generate", "regenerate") and args.skill_dir is not None:
         refresh_research(root, args.skill_dir, dt)      # PR snapshot = the state this run starts from
         record_pr_heads(root, dt)                       # and the code of each open PR it starts from
+        if WATCHER is not None:
+            WATCHER.reset(dt)                           # the old "new commits" answer was against the old baseline
 
     work = root / "out" / dt / ".dashboard"
     work.mkdir(parents=True, exist_ok=True)
@@ -1795,7 +1816,8 @@ def main() -> int:
 
     api = Api(args.server, args.token, args.name)
     last_publish = 0.0
-    watcher = HeadWatcher(args.project_root)
+    global WATCHER
+    watcher = WATCHER = HeadWatcher(args.project_root)
     watcher.start()
     print(f"Worker {args.name} -> {api.server}\n  project: {args.project_root}\n  skill:   {args.skill_dir}\n"
           f"  model:   {args.model}\n"

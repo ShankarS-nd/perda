@@ -1345,3 +1345,23 @@ def test_details_stored_before_a_new_field_still_load_with_it():
         conn.close()
     got = tj.get_details("DT-77")
     assert got["plain"]["problem"] == "old row" and got["plain"]["changes"] == [] and got["prs"] == [] and got["technical"] == []
+
+
+def test_a_new_baseline_clears_the_flagged_commits_at_once(tmp_path):
+    watcher = tw.HeadWatcher(tmp_path)
+    watcher.result = {"DT-4": [{"pr": "repo_a#2", "before": "bbbbbbb", "now": "ccccccc"}], "DT-5": [{"pr": "r#1", "before": "a", "now": "b"}]}
+    watcher.reset("DT-4")
+    assert watcher.get("DT-4") == [] and len(watcher.get("DT-5")) == 1             # only that ticket is cleared
+    watcher.reset("DT-9")
+    assert watcher.get("DT-9") == []
+
+
+def test_prompts_ask_for_scenarios_first_and_one_testcase_per_scenario(tmp_path):
+    for stage in ("generate", "regenerate"):
+        prompt = tw.build_prompt({"dt": "DT-1", "stage": stage, "id": "j", "params": {}}, tmp_path / "r.json")
+        assert "SCENARIOS FIRST" in prompt and "ONE testcase per scenario" in prompt and "never one file per platform" in prompt
+    regen = tw.build_prompt({"dt": "DT-1", "stage": "regenerate", "id": "j", "params": {}}, tmp_path / "r.json")
+    assert "merge them into one file" in regen and "do not merge" in regen          # merging only before a Jira TC id exists
+    from pathlib import Path
+    skill = (Path(__file__).resolve().parents[2] / ".claude" / "skills" / "bug-regression" / "SKILL.md").read_text()
+    assert "Scenarios first, then testcases" in skill and "A different file path for the same check is NEVER a reason" in skill

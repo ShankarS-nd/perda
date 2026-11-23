@@ -210,6 +210,30 @@ what would raise or lower that confidence.
 Use only methods that appear in the manifest (`out/_cache/manifest/<branch>.json`); oracle log
 lines taken verbatim from real source or real Jira comments — never invented.
 
+### Scenarios first, then testcases — one testcase per scenario, never one per platform
+
+Before you write any file, write down the **scenarios**: the distinct behaviours the fix changes
+that a device can show. Put them in `bug_analysis.json` as `"scenarios": [{"id": "S1", "what":
+"<one sentence: the behaviour checked>", "families": ["octo", "bagheera3"], "differs_by_family":
+"<only the path / command / unit name, or the behaviour itself>"}]`. Then write testcases from that
+list:
+
+1. **One testcase per scenario.** If a scenario applies to several families and only the *path,
+   command, unit name, config file or expected value* differs, that is ONE testcase. It reads
+   `device_type` (or probes the device, see "Probe and adapt" below) and picks the right path or
+   command inside its steps. Do not write one file per platform for the same scenario.
+2. **A separate file is justified only when the scenario itself is different** (a different
+   behaviour is checked, or a lever exists on one family only), never because the commands are
+   different.
+3. **Merge test before you finish:** compare your candidates with the scenario list. If two files
+   share a scenario and differ only by platform commands or paths, merge them into one file with the
+   platform handling inside, and delete the extra file.
+4. **In `bug_analysis.json`, map each testcase file to the scenario ids it covers** (`"candidates":
+   [{"file": ..., "scenarios": ["S1"], ...}]`).
+
+A reviewer should be able to read the scenario list and see exactly what is verified, without
+opening the files.
+
 **The `.py` file itself gets a single one-line docstring — source ticket + one-sentence purpose,
 nothing else.** e.g.:
 ```python
@@ -292,9 +316,11 @@ Order of preference, strongest first:
 },
 ```
 
-3. **Two sibling candidates**, one per family, when both families have the behaviour but the
-   oracle/lever differs so much that one file would be all branching. Give each its own NA gate and
-   cross-reference them in `bug_analysis.json`.
+3. **Two sibling candidates**, one per family — **only when the two families check different
+   behaviour** (see "Scenarios first" above), not when only the path, command or expected value
+   differs: that is option 1. A different file path for the same check is NEVER a reason for a second
+   file. If you do write siblings, give each its own NA gate, say in `bug_analysis.json` which
+   scenario ids differ, and cross-reference them.
 
 Mechanics that are easy to get wrong here:
 
