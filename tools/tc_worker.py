@@ -1149,13 +1149,25 @@ def build_prompt(job: dict[str, Any], result_file: Path) -> str:
         "so in `idea` or `fix` in a few words. Cover every change that affects behaviour; say if the PRs are mostly clean-up. "
         "Be accurate: describe only what the code really does, never guess.")
     req_note += (
-        "\n\nSCENARIOS FIRST: before writing any testcase, list the scenarios (distinct behaviours the fix changes) as "
-        "`\"scenarios\": [{\"id\": \"S1\", \"what\": ..., \"families\": [...], \"differs_by_family\": ...}]` in bug_analysis.json, "
-        "then write ONE testcase per scenario. When the same scenario applies to several platforms and only the path, "
-        "command, unit name or expected value differs, write ONE testcase that picks the right one for the platform inside "
-        "its steps (probe the device or read `device_type`); never one file per platform. Two files are justified only "
-        "when they check different behaviour. Map every testcase file to its scenario ids in `candidates`. Before you finish, "
-        "merge any two files that share a scenario and differ only by platform commands, and delete the extra file.")
+        "\n\nSCENARIOS FIRST. Before writing or keeping any testcase, list the scenarios in bug_analysis.json as "
+        "`\"scenarios\": [{\"id\": \"S1\", \"what\": ..., \"families\": [...], \"differs_by_family\": ...}]`.\n"
+        "A scenario is a BEHAVIOUR, not a platform. NEVER make one scenario per platform: if Octo and Bagheera3 both must "
+        "end up with the same thing (for example the same setting present once in their boot config), that is ONE scenario "
+        "listing both families.\n"
+        "Then write ONE testcase file per scenario. The platform differences go INSIDE that one file: read `device_type` (or "
+        "probe the device) and choose the file path, command, unit name or expected value per platform, or run an extra step "
+        "only on the platform that has it (use the DSL's condition / jump mechanics from the skill's section 5, or one "
+        "command that branches in the shell). A platform-only extra check (for example a recovery config that exists on one "
+        "family only) is a step inside the one file, skipped or NA elsewhere, not a reason for a second file.\n"
+        "THESE ARE NOT REASONS FOR A SECOND FILE: 'the boot config / file layout differs', 'the commands differ', 'one family "
+        "has extra checks', 'the file would need branching'. A second file is allowed only when a DIFFERENT behaviour is "
+        "checked (a different thing must happen), and then `differs_by_family` must say which behaviour differs, not which "
+        "path.\n"
+        "Map every file to its scenario ids in `candidates`. If files ALREADY exist in out/" + dt + "/ (a re-run), apply "
+        "the same rule to them now: merge any two files that cover the same behaviour into one file that handles every "
+        "platform, delete the extra file, and re-run validate_candidate.py. Do this only when neither file has a real Jira TC "
+        "id yet (its name still has a placeholder id and `jira_tc_subtasks` has no entry for it); if one already has a Jira "
+        "id, do not merge, and say in `summary` that they could be merged.")
     if stage == "generate":
         return head + common + req_note + pr_note
     if stage == "regenerate":

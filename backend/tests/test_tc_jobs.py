@@ -1359,7 +1359,9 @@ def test_a_new_baseline_clears_the_flagged_commits_at_once(tmp_path):
 def test_prompts_ask_for_scenarios_first_and_one_testcase_per_scenario(tmp_path):
     for stage in ("generate", "regenerate"):
         prompt = tw.build_prompt({"dt": "DT-1", "stage": stage, "id": "j", "params": {}}, tmp_path / "r.json")
-        assert "SCENARIOS FIRST" in prompt and "ONE testcase per scenario" in prompt and "never one file per platform" in prompt
+        assert "SCENARIOS FIRST" in prompt and "ONE testcase file per scenario" in prompt and "NEVER make one scenario per platform" in prompt
+        assert "NOT REASONS FOR A SECOND FILE" in prompt and "layout differs" in prompt     # DT-5555's excuse, ruled out
+        assert "merge any two files that cover the same behaviour" in prompt and "Jira TC" in prompt
     regen = tw.build_prompt({"dt": "DT-1", "stage": "regenerate", "id": "j", "params": {}}, tmp_path / "r.json")
     assert "merge them into one file" in regen and "do not merge" in regen          # merging only before a Jira TC id exists
     from pathlib import Path

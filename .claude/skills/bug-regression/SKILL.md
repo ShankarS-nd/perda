@@ -224,7 +224,12 @@ list:
    command inside its steps. Do not write one file per platform for the same scenario.
 2. **A separate file is justified only when the scenario itself is different** (a different
    behaviour is checked, or a lever exists on one family only), never because the commands are
-   different.
+   different. **A scenario is a behaviour, not a platform:** never write S1 for Octo and S2 for
+   Bagheera3 when both must end in the same state. These are NOT reasons for a second file: "the
+   boot config / file layout differs", "the commands differ", "one family has extra checks", "one
+   file would need branching". Put the platform differences inside the one file: choose the path or
+   command from `device_type`, and run a platform-only extra check (a recovery config that exists on
+   one family) as a step that is skipped or NA elsewhere.
 3. **Merge test before you finish:** compare your candidates with the scenario list. If two files
    share a scenario and differ only by platform commands or paths, merge them into one file with the
    platform handling inside, and delete the extra file.
