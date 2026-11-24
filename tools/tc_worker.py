@@ -23,6 +23,7 @@ BUGREG_PROJECT_ROOT, BUGREG_SKILL_DIR.
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -465,6 +466,36 @@ def requirements(root: Path, dt: str) -> dict[str, Any]:
 
 def valid_branch_name(name: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9._/\-]{1,200}", name)) and ".." not in name and not name.startswith("-")
+
+
+LIMIT_RE = re.compile(r"hit your[^\n]{0,40}?limit", re.I)
+RESET_RE = re.compile(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*(?:\(([A-Za-z_/+\-]+)\))?", re.I)
+HOLD_UNTIL = 0.0                # epoch seconds: do not claim jobs before this (Claude's usage limit is reached)
+HOLD_NOTE = ""
+
+
+def usage_limit(text: str, now: float | None = None) -> tuple[str, float] | None:
+    """If Claude's own output says its usage limit was hit: (what to tell the user, when to resume as epoch seconds)."""
+    if not LIMIT_RE.search(text or ""):
+        return None
+    now = time.time() if now is None else now
+    resume, label = now + 1800, "in about 30 minutes"           # unknown reset time: try again in half an hour
+    m = RESET_RE.search(text)
+    if m:
+        hour, minute, ampm, tzname = int(m.group(1)) % 12, int(m.group(2) or 0), m.group(3).lower(), m.group(4)
+        hour += 12 if ampm == "pm" else 0
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(tzname) if tzname else None
+        except Exception:  # noqa: BLE001 - unknown zone name: fall back to local time
+            tz = None
+        base = datetime.datetime.fromtimestamp(now, tz)
+        at = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if at.timestamp() <= now:
+            at += datetime.timedelta(days=1)
+        resume = min(at.timestamp() + 120, now + 6 * 3600)       # two minutes after the reset, never more than 6 hours
+        label = f"at {m.group(1)}:{m.group(2) or '00'}{m.group(3).lower()}" + (f" ({tzname})" if tzname else "")
+    return label, resume
 
 
 def pr_snapshot(root: Path, dt: str) -> tuple[dict[str, str], str]:
@@ -1723,6 +1754,7 @@ def run_job(api: Api, args: argparse.Namespace, job: dict[str, Any]) -> None:
     stopped = ""
     linger_since: float | None = None
     pending = f"Worker {api.worker}: running the bug-regression skill, stage {stage}, in {root}\n"
+    seen_tail = ""
     while True:
         alive = proc.poll() is None
         try:
@@ -1732,7 +1764,9 @@ def run_job(api: Api, args: argparse.Namespace, job: dict[str, Any]) -> None:
             finish("cancelled", "", "The worker was stopped while the job was running.", {})
             raise
         while not lines.empty():
-            pending += lines.get() + "\n"
+            chunk = lines.get()
+            pending += chunk + "\n"
+            seen_tail = (seen_tail + chunk + "\n")[-6000:]
         try:
             reply = api.post(f"/tc-worker/jobs/{jid}/progress", {"log": scrub(pending, secret_values)})
             pending = ""
@@ -1767,6 +1801,14 @@ def run_job(api: Api, args: argparse.Namespace, job: dict[str, Any]) -> None:
         return finish("failed", "", f"Stopped after {STAGE_TIMEOUT_MIN[stage]} minutes without finishing.", {})
     result = read_result(result_file)
     if proc.returncode != 0 and not result:
+        limit = usage_limit(seen_tail)
+        if limit:
+            global HOLD_UNTIL, HOLD_NOTE
+            HOLD_UNTIL = limit[1]
+            HOLD_NOTE = f"Claude's usage limit is reached; queued jobs wait until it resets {limit[0]}."
+            print(f"  usage limit reached: no jobs are claimed until {time.strftime('%H:%M', time.localtime(limit[1]))}", flush=True)
+            return finish("failed", "", f"Claude's usage limit is reached; it resets {limit[0]}. Nothing was run. "
+                                        f"Jobs still waiting in the queue are held until then. Run this one again after the reset.", {})
         return finish("failed", "", f"claude exited with code {proc.returncode}. See the log.", {})
     status, outcome, message, final = verify(root, job, result, before)
     if stage == "validate" and status == "done" and not (outcome == "no" and final.get("changed_files")):
@@ -1837,7 +1879,9 @@ def main() -> int:
     warned = False
     while True:
         try:
-            job = api.post("/tc-worker/claim", {"project_root": str(args.project_root)}).get("job")
+            holding = time.time() < HOLD_UNTIL
+            job = api.post("/tc-worker/claim", {"project_root": str(args.project_root), "hold": holding,
+                                                "note": HOLD_NOTE if holding else ""}).get("job")
             warned = False
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 503):

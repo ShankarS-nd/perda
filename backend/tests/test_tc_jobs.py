@@ -1367,3 +1367,65 @@ def test_prompts_ask_for_scenarios_first_and_one_testcase_per_scenario(tmp_path)
     from pathlib import Path
     skill = (Path(__file__).resolve().parents[2] / ".claude" / "skills" / "bug-regression" / "SKILL.md").read_text()
     assert "Scenarios first, then testcases" in skill and "A different file path for the same check is NEVER a reason" in skill
+
+
+def test_usage_limit_message_is_recognised_and_the_reset_time_is_worked_out():
+    import datetime
+    from zoneinfo import ZoneInfo
+    ist = ZoneInfo("Asia/Kolkata")
+    now = datetime.datetime(2026, 11, 24, 15, 0, tzinfo=ist).timestamp()                     # 3:00pm IST
+    label, resume = tw.usage_limit("You've hit your 5-hour limit · resets 4:50pm (Asia/Kolkata)", now)
+    assert label == "at 4:50pm (Asia/Kolkata)"
+    assert datetime.datetime.fromtimestamp(resume, ist).strftime("%H:%M") == "16:52"         # two minutes after the reset
+    # a reset time already past today means tomorrow, and it is never more than 6 hours away
+    _, resume = tw.usage_limit("You've hit your usage limit · resets 9am (Asia/Kolkata)", now)
+    assert resume == now + 6 * 3600
+    # no reset time in the text: try again in half an hour; unknown zone name falls back to local time
+    assert tw.usage_limit("You've hit your weekly limit", now)[1] == now + 1800
+    assert tw.usage_limit("hit your 5-hour limit resets 4:50pm (No/Such_Zone)", now) is not None
+    assert tw.usage_limit("claude exited normally", now) is None and tw.usage_limit("", now) is None
+
+
+def test_a_holding_worker_stays_online_but_is_handed_no_job():
+    tj.create_job("DT-31", "generate", {}, "Giri")
+    assert tj.claim("w9", "", hold=True, note="Claude's usage limit is reached") is None     # the queued job is not handed out
+    conn = db._connect()
+    try:
+        assert tj.worker_state(conn) == {**tj.worker_state(conn), "online": True, "note": "Claude's usage limit is reached"}
+    finally:
+        conn.close()
+    got = tj.claim("w9")                                                                       # the hold ends: the job is handed out
+    assert got and got["dt"] == "DT-31"
+    conn = db._connect()
+    try:
+        assert tj.worker_state(conn)["note"] == ""                                             # and the note is gone
+    finally:
+        conn.close()
+
+
+def test_a_job_that_hits_the_usage_limit_fails_clearly_and_holds_the_queue(tmp_path, monkeypatch):
+    import argparse
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\necho 'You have hit your 5-hour limit · resets 4:50pm (Asia/Kolkata)'\nexit 1\n")
+    fake.chmod(0o755)
+    (tmp_path / "skill").mkdir()
+    done = {}
+
+    class FakeApi:
+        worker = "w"
+
+        def post(self, path, body=None):
+            if path.endswith("/finish"):
+                done.update(body)
+            return {}
+    monkeypatch.setattr(tw, "HOLD_UNTIL", 0.0)
+    monkeypatch.setattr(tw, "HOLD_NOTE", "")
+    monkeypatch.setattr(tw, "FLUSH_SEC", 0.2)
+    args = argparse.Namespace(project_root=tmp_path, skill_dir=tmp_path / "skill", claude=str(fake), model="sonnet",
+                              permission_mode="bypassPermissions", once=True)
+    job = {"id": "a" * 32, "dt": "DT-41", "stage": "generate", "params": {}, "secrets": {}}
+    tw.run_job(FakeApi(), args, job)
+    assert done["status"] == "failed" and "usage limit is reached" in done["message"] and "4:50pm (Asia/Kolkata)" in done["message"]
+    assert "exited with code" not in done["message"]
+    import time
+    assert tw.HOLD_UNTIL > time.time() and "queued jobs wait" in tw.HOLD_NOTE                 # the worker now claims nothing

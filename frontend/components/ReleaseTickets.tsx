@@ -107,7 +107,7 @@ function prAlerts(req: TcRequirements | undefined, prs: PullRequest[] | null | u
     short: [...ch.map((c) => `${c.key} ${(PR_LABEL[c.now] ?? c.now).toLowerCase()}`), ...cm.map((c) => `${c.pr} new commits`)],
   };
 }
-interface WorkerState { online: boolean; name: string; last_seen: string }
+interface WorkerState { online: boolean; name: string; last_seen: string; note?: string }
 type Panel = { kind: "start"; stage: Stage; dt: string } | { kind: "job"; id: string };
 
 const STAGE_LABEL: Record<Stage, string> = {
@@ -1168,7 +1168,10 @@ function JobPanel({
               )
             )}
             {job?.status === "queued" && (
-              <p className="text-[12.5px] text-gray-500">Waiting for the workstation worker to pick this up{worker && !worker.online ? " (no worker is running)" : ""}.</p>
+              <p className="text-[12.5px] text-gray-500">
+                {worker?.online && worker.note ? <span className="text-amber-300/90">{worker.note} This job starts by itself after that.</span>
+                  : <>Waiting for the workstation worker to pick this up{worker && !worker.online ? " (no worker is running)" : ""}.</>}
+              </p>
             )}
             {error && <p className="text-[12.5px] text-amber-300">{error}</p>}
             <pre ref={logBox} className="min-h-[220px] flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/40 p-3 font-mono text-[11.5px] leading-relaxed text-gray-300">
@@ -1773,10 +1776,10 @@ export default function ReleaseTickets({ initialQuery }: { initialQuery?: Partia
                 {lastSync && <span className="text-gray-600">· synced {ago(new Date(lastSync).toISOString(), now)}</span>}
                 {jobsOn && worker && (
                   <span
-                    className={worker.online ? "text-emerald-300/80" : "text-amber-300/80"}
-                    title={worker.online ? `Claude jobs run on ${worker.name}` : "Claude jobs wait in the queue until tools/tc_worker.py is running on the workstation"}
+                    className={worker.online && !worker.note ? "text-emerald-300/80" : "text-amber-300/80"}
+                    title={worker.online ? (worker.note || `Claude jobs run on ${worker.name}`) : "Claude jobs wait in the queue until tools/tc_worker.py is running on the workstation"}
                   >
-                    · Claude worker {worker.online ? "online" : "offline"}
+                    · Claude worker {worker.online ? (worker.note ? "paused" : "online") : "offline"}
                   </span>
                 )}
               </div>

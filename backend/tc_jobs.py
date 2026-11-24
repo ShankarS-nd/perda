@@ -284,9 +284,11 @@ def _fail_stale(conn) -> None:
 def worker_state(conn) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM tc_workers ORDER BY last_seen DESC LIMIT 1").fetchone()
     if not row:
-        return {"online": False, "name": "", "last_seen": ""}
+        return {"online": False, "name": "", "last_seen": "", "note": ""}
     age = (datetime.now(timezone.utc) - datetime.fromisoformat(row["last_seen"])).total_seconds()
-    return {"online": age <= WORKER_ONLINE_SEC, "name": row["name"], "last_seen": row["last_seen"]}
+    online = age <= WORKER_ONLINE_SEC
+    return {"online": online, "name": row["name"], "last_seen": row["last_seen"],
+            "note": (row["note"] if "note" in row.keys() else "") if online else ""}
 
 
 TC_FILE_RE = re.compile(r"^TC_[A-Za-z0-9_\-]{1,160}\.py$")
@@ -657,22 +659,24 @@ def cancel_job(job_id: str) -> dict[str, Any]:
 # Worker side
 # ---------------------------------------------------------------------------
 
-def claim(worker: str, project_root: str = "") -> dict[str, Any] | None:
-    """Record that a worker is alive and hand it the oldest queued job, if any."""
+def claim(worker: str, project_root: str = "", hold: bool = False, note: str = "") -> dict[str, Any] | None:
+    """Record that a worker is alive and hand it the oldest queued job, if any.
+    A worker that holds (its Claude usage limit is reached) is alive but is handed nothing, and its note is shown."""
     worker = (worker or "worker").strip()[:80]
+    note = " ".join(str(note or "").split())[:200] if hold else ""
     conn = db._connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         now = _now()
         conn.execute(
             """
-            INSERT INTO tc_workers (name, last_seen, project_root) VALUES (?, ?, ?)
+            INSERT INTO tc_workers (name, last_seen, project_root, note) VALUES (?, ?, ?, ?)
             ON CONFLICT(name) DO UPDATE SET last_seen = excluded.last_seen,
-                project_root = excluded.project_root
+                project_root = excluded.project_root, note = excluded.note
             """,
-            (worker, now, project_root[:300]),
+            (worker, now, project_root[:300], note),
         )
-        row = conn.execute(
+        row = None if hold else conn.execute(
             "SELECT * FROM tc_jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
         ).fetchone()
         if row:

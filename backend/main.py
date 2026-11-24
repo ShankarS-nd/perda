@@ -787,6 +787,8 @@ class TcJobRequest(BaseModel):
 class TcWorkerClaim(BaseModel):
     worker: str = ""
     project_root: str = ""
+    hold: bool = False               # alive, but do not hand out a job (Claude's usage limit is reached)
+    note: str = ""                   # shown on the page while holding
 
 
 class TcWorkerProgress(BaseModel):
@@ -858,7 +860,7 @@ def tc_job_cancel(job_id: str):
 def tc_worker_claim(payload: TcWorkerClaim, x_worker_token: str | None = Header(None)):
     import tc_jobs
     _tc(tc_jobs.check_token, x_worker_token)
-    return {"job": _tc(tc_jobs.claim, payload.worker, payload.project_root)}
+    return {"job": _tc(tc_jobs.claim, payload.worker, payload.project_root, payload.hold, payload.note)}
 
 
 @app.post("/tc-worker/requirements")

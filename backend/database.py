@@ -257,9 +257,14 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS tc_workers (
                 name         TEXT PRIMARY KEY,
                 last_seen    TEXT NOT NULL,
-                project_root TEXT NOT NULL DEFAULT ''
+                project_root TEXT NOT NULL DEFAULT '',
+                note         TEXT NOT NULL DEFAULT ''
             );
         """)
+        # a database made before the note column existed
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(tc_workers)")]
+        if "note" not in cols:
+            conn.execute("ALTER TABLE tc_workers ADD COLUMN note TEXT NOT NULL DEFAULT ''")
 
         # CREATE TABLE IF NOT EXISTS leaves an already-created table alone, so a
         # column added after a database exists has to be migrated in by hand.
